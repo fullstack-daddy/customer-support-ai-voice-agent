@@ -1,0 +1,38 @@
+{
+  "name": "@relaypay/mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RelayPay support MCP server — customer/transaction/payout lookup, ticketing, escalation, event logging, knowledge-base retrieval.",
+  "main": "./dist/index.js",
+  "bin": {
+    "relaypay-mcp": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/index.js",
+    "smoke": "tsx scripts/smoke-test.ts",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@relaypay/shared": "*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

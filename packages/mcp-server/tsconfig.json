@@ -5,9 +5,7 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022", "DOM"],
     "types": ["node"],
-    "composite": true,
     "declaration": true,
-    "declarationMap": true,
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
@@ -16,5 +14,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
+  "references": [{ "path": "../shared" }],
   "include": ["src/**/*.ts"]
 }
