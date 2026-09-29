@@ -1,0 +1,26 @@
+{
+  "name": "relaypay-support-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RelayPay production customer support agent — Vapi voice layer, Claude Agent SDK logic, custom MCP server, Supabase records.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@relaypay/web",
+    "build": "npm run build --workspace=@relaypay/shared && npm run build --workspace=@relaypay/mcp-server && npm run build --workspace=@relaypay/agent && npm run build --workspace=@relaypay/web",
+    "seed": "tsx supabase/seed/load.ts",
+    "eval": "tsx scripts/eval/run-scenarios.ts",
+    "mcp:smoke": "tsx packages/mcp-server/scripts/smoke-test.ts",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

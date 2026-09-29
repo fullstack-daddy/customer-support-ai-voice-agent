@@ -1,0 +1,22 @@
+node_modules
+dist
+.next
+out
+build
+
+# Env — never commit real values. .env.example is the only tracked env file.
+.env
+.env.*
+!.env.example
+
+# Logs / local state
+*.log
+.data
+.turbo
+coverage
+
+# Editors / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
