@@ -13,6 +13,7 @@
 //    screen reader announces new turns.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { redactTranscript } from '@relaypay/shared';
 
 type CallState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error' | 'ended';
 
@@ -82,7 +83,11 @@ export default function CallWidget({
         // flicker and would confuse a screen reader.
         if (msg?.type === 'transcript' && msg?.transcriptType === 'final') {
           const role: 'user' | 'assistant' = msg.role === 'assistant' ? 'assistant' : 'user';
-          const text = String(msg.transcript ?? '').trim();
+          // Scrub before it reaches the screen. The transcript panel is a
+          // real disclosure surface: it is visible to anyone looking at
+          // the caller's screen, and it is what the download button writes
+          // to disk. A spoken card number must not survive to either.
+          const text = redactTranscript(String(msg.transcript ?? '').trim()).text;
           if (text) setTurns((prev) => [...prev, { role, text, at: Date.now() }]);
           // A finished user turn means the agent is now thinking.
           if (role === 'user') setState('thinking');

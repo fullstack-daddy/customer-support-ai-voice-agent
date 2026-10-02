@@ -6,7 +6,7 @@
 // the unconditional transcript. If the two disagree, this one is right,
 // because the model cannot forget to call it.
 
-import { supabaseAdmin, withTimeout } from '@relaypay/shared';
+import { supabaseAdmin, withTimeout, redactTranscript, describeRedactions } from '@relaypay/shared';
 import type { AnswerType } from '@relaypay/shared';
 
 export interface TurnRecord {
@@ -21,16 +21,25 @@ export interface TurnRecord {
 
 export async function writeTurn(turn: TurnRecord): Promise<void> {
   const db = supabaseAdmin();
+
+  // Last line of defence before anything is persisted. A caller who read
+  // out a card number must not leave it sitting in a Postgres column.
+  // The note records THAT something was caught, never the value — which
+  // is useful evidence for a reviewer on its own.
+  const t = redactTranscript(turn.transcript);
+  const r = redactTranscript(turn.response);
+  const redactionNote = describeRedactions([...t.hits, ...r.hits]);
+
   const res = await withTimeout('write turn', () =>
     db.from('conversation_turns').upsert(
       {
         conversation_id: turn.conversationId,
         turn_index: turn.turnIndex,
         role: turn.role,
-        transcript: turn.transcript ?? null,
-        response: turn.response ?? null,
+        transcript: t.text || null,
+        response: r.text || null,
         answer_type: turn.answerType ?? null,
-        confidence_note: turn.confidenceNote ?? null
+        confidence_note: [turn.confidenceNote, redactionNote].filter(Boolean).join('; ') || null
       },
       { onConflict: 'conversation_id,turn_index' }
     )

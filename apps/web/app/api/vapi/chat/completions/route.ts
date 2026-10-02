@@ -14,6 +14,7 @@
 // child process, which Edge cannot do.
 
 import { runAgentTurn } from '@relaypay/agent';
+import { redactTranscript } from '@relaypay/shared';
 import { verifyVapiRequest, rateLimit, clientKey, json } from '@/lib/security.server';
 
 export const runtime = 'nodejs';
@@ -136,10 +137,21 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const userMessage = flattenContent(conversational[lastUserIdx]!.content);
+  // Redact at the EARLIEST possible point. A caller can read out a card
+  // number or a one-time code at any moment, and no system prompt can stop
+  // them — by the time text exists, the value has been captured. Scrubbing
+  // here means it never reaches the model, the tools, or any log line.
+  const rawUserMessage = flattenContent(conversational[lastUserIdx]!.content);
+  const scrubbed = redactTranscript(rawUserMessage);
+  if (scrubbed.redacted) {
+    // Kinds only — logging the value would defeat the entire exercise.
+    console.warn(`[vapi] redacted from caller turn on ${conversationId}: ${scrubbed.hits.map((h) => h.kind).join(', ')}`);
+  }
+  const userMessage = scrubbed.text;
+
   const history = conversational.slice(0, lastUserIdx).map((m) => ({
     role: m.role as 'user' | 'assistant',
-    content: flattenContent(m.content)
+    content: redactTranscript(flattenContent(m.content)).text
   })).filter((m) => m.content);
 
   try {
