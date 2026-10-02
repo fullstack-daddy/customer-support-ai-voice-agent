@@ -16,6 +16,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, basename } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
 const WEB_DIR = join(ROOT, 'apps', 'web');
@@ -51,6 +52,44 @@ const LITERAL_PATTERNS = [
 const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'dist', 'out', 'build', 'coverage', '.turbo']);
 const SCAN_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|json|md|sql|yml|yaml|env)$/i;
 
+/**
+ * Files git ignores cannot leak — they are never committed, never built
+ * into a bundle, and never deployed. Scanning them produces false
+ * positives on exactly the file that is SUPPOSED to hold real
+ * credentials: your local .env.
+ *
+ * `.env.example` is tracked, so it is still scanned — a real value there
+ * would be a genuine leak.
+ */
+function gitIgnoredSet() {
+  try {
+    const out = execFileSync(
+      'git',
+      ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'],
+      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    return new Set(
+      out.split('\n').map((l) => l.trim().replace(/\/$/, '')).filter(Boolean)
+    );
+  } catch {
+    // Not a git repo, or git unavailable. Fall back to scanning
+    // everything — a false positive is better than a missed secret.
+    return new Set();
+  }
+}
+
+const IGNORED = gitIgnoredSet();
+
+function isGitIgnored(relPath) {
+  const norm = relPath.replace(/\\/g, '/');
+  if (IGNORED.has(norm)) return true;
+  // A directory entry in the ignore list covers everything beneath it.
+  for (const entry of IGNORED) {
+    if (entry && norm.startsWith(`${entry}/`)) return true;
+  }
+  return false;
+}
+
 function walk(dir, acc = []) {
   if (!existsSync(dir)) return acc;
   for (const entry of readdirSync(dir)) {
@@ -68,6 +107,7 @@ const failures = [];
 // ---- Check 1: service-role key inside apps/web, outside server-only files.
 for (const file of walk(WEB_DIR)) {
   const rel = relative(ROOT, file);
+  if (isGitIgnored(rel)) continue;
   if (SERVER_ONLY.some((re) => re.test(file))) continue;
   const text = readFileSync(file, 'utf8');
   if (text.includes('SUPABASE_SERVICE_ROLE_KEY')) {
@@ -82,6 +122,7 @@ for (const file of walk(WEB_DIR)) {
 const allFiles = walk(ROOT);
 for (const file of allFiles) {
   const rel = relative(ROOT, file);
+  if (isGitIgnored(rel)) continue;
   if (basename(file) === 'check-secrets.mjs') continue;   // this file names them on purpose
   const text = readFileSync(file, 'utf8');
   for (const name of SECRET_NAMES) {
@@ -95,6 +136,7 @@ for (const file of allFiles) {
 // ---- Check 3: literal credentials in tracked files.
 for (const file of allFiles) {
   const rel = relative(ROOT, file);
+  if (isGitIgnored(rel)) continue;
   if (basename(file) === 'check-secrets.mjs') continue;   // the regexes themselves
   if (rel === '.env.example') continue;                   // template, values are blank
   const text = readFileSync(file, 'utf8');
