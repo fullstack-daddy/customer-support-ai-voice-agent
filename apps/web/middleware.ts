@@ -63,6 +63,11 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // The login page itself must be reachable while signed OUT. Without
+  // this it redirects to itself forever — the matcher covers /admin/*,
+  // and /admin/login is in /admin/*.
+  if (pathname === '/admin/login') return NextResponse.next();
+
   // API routes get JSON, not a redirect — a fetch should not silently
   // receive an HTML login page and try to parse it.
   if (pathname.startsWith('/api/admin')) {
