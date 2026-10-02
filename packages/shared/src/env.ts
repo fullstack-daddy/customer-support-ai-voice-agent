@@ -31,6 +31,17 @@ const serverSchema = z.object({
 
   INTERNAL_REVIEW_SECRET: z.string().optional(),
 
+  // Admin console. No sign-up — this account is the whole auth model.
+  ADMIN_EMAIL: z.string().optional(),
+  ADMIN_PASSWORD: z.string().optional(),
+  ADMIN_NAME: z.string().optional(),
+  AUTH_SECRET: z.string().optional(),
+
+  // Email. Required to actually send a ticket confirmation.
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+  EMAIL_REPLY_TO: z.string().optional(),
+
   APP_BASE_URL: z.string().url().default('http://localhost:3000'),
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000')
 });

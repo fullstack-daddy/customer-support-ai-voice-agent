@@ -4,7 +4,8 @@
 // turns, tool calls, retrieval, tickets, escalations.
 
 import { supabaseAdmin, withTimeout } from '@relaypay/shared';
-import { verifyInternalSecret, json } from '@/lib/security.server';
+import { json } from '@/lib/security.server';
+import { requireAdmin } from '@/lib/admin.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,9 +14,9 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
+  const guard = await requireAdmin();
+  if ('error' in guard) return guard.error;
   const url = new URL(req.url);
-  const authError = verifyInternalSecret(req.headers, url);
-  if (authError) return json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
   const db = supabaseAdmin();

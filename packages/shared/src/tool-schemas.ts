@@ -127,7 +127,12 @@ export const CreateSupportTicketInput = z.object({
   category: z.string().min(1, 'category is required.'),
   priority: z.enum(TICKET_PRIORITIES),
   summary: z.string().min(1, 'summary is required.'),
-  conversation_id: z.string().min(1, 'conversation_id is required.')
+  conversation_id: z.string().min(1, 'conversation_id is required.'),
+  // Optional: when the caller has given contact details, the ticket can
+  // produce a confirmation email. Both are what the agent HEARD — they
+  // are surfaced to the caller for correction before anything is sent.
+  contact_name: z.string().optional(),
+  contact_email: z.string().optional()
 });
 export type CreateSupportTicketInput = z.infer<typeof CreateSupportTicketInput>;
 

@@ -6,16 +6,17 @@
 // client-to-Supabase access with a privileged key.
 
 import { supabaseAdmin, withTimeout } from '@relaypay/shared';
-import { verifyInternalSecret, json } from '@/lib/security.server';
+import { json } from '@/lib/security.server';
+import { requireAdmin } from '@/lib/admin.server';
 import { sweepStaleConversations } from '@/lib/sweep.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request): Promise<Response> {
+  const guard = await requireAdmin();
+  if ('error' in guard) return guard.error;
   const url = new URL(req.url);
-  const authError = verifyInternalSecret(req.headers, url);
-  if (authError) return json({ error: 'Unauthorized' }, { status: 401 });
 
   // Opportunistic cleanup of calls whose end-of-call report never arrived.
   await sweepStaleConversations().catch(() => {});

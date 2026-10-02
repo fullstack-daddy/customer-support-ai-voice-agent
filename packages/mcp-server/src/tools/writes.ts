@@ -27,6 +27,45 @@ function shortRef(prefix: string): string {
 }
 
 /**
+ * Record what the agent HEARD for a caller's contact details, pending
+ * human confirmation.
+ *
+ * Speech recognition mangles names and email addresses more than almost
+ * anything else — "efua@accrastack.example" routinely arrives as
+ * "effu at accra stack example". Writing the heard value straight onto a
+ * ticket is how a confirmation email goes to a stranger, or nowhere.
+ *
+ * So the heard value is stored separately and surfaced to the caller in
+ * an editable field during the call. Only the confirmed value is ever
+ * used to send anything.
+ *
+ * Advisory: a failure here must never fail the ticket or escalation that
+ * triggered it — the record matters more than the confirmation prompt.
+ */
+async function captureContact(
+  conversationId: string,
+  purpose: 'ticket' | 'escalation' | 'callback',
+  heardName?: string | null,
+  heardEmail?: string | null
+): Promise<void> {
+  if (!heardName && !heardEmail) return;
+  try {
+    const db = supabaseAdmin();
+    await withTimeout('contact capture', () =>
+      db.from('contact_captures').insert({
+        conversation_id: conversationId,
+        heard_name: heardName ?? null,
+        heard_email: heardEmail ?? null,
+        purpose,
+        status: 'pending'
+      })
+    );
+  } catch (e) {
+    console.error(`[contact] capture failed for ${conversationId}: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+/**
  * Ensure a conversations row exists before anything foreign-keys to it.
  *
  * Tool-call ordering is not guaranteed — an escalation can arrive before
@@ -97,7 +136,12 @@ export async function createSupportTicket(ctx: ToolContext, raw: unknown): Promi
             category: input.category,
             priority: input.priority,
             summary: input.summary,
-            status: 'open'
+            status: 'open',
+            contact_name: input.contact_name ?? null,
+            // Seeded from what was heard; corrected by the caller, then
+            // reviewed by an admin. Nothing sends automatically.
+            email_to: input.contact_email ?? null,
+            email_status: 'draft'
           })
           .select('ticket_id, status')
           .single()
@@ -129,6 +173,10 @@ export async function createSupportTicket(ctx: ToolContext, raw: unknown): Promi
         }
         throw new Error(err.message ?? 'ticket insert failed');
       }
+
+      // Surface the heard contact details for live correction, so the
+      // confirmation email goes to the address the caller actually has.
+      await captureContact(input.conversation_id, 'ticket', input.contact_name, input.contact_email);
 
       return {
         payload: { ticket_id: ticketId, status: 'open' },
@@ -222,11 +270,18 @@ export async function createEscalation(ctx: ToolContext, raw: unknown): Promise<
             preferred_time: input.preferred_time ?? null,
             call_booked: Boolean(input.preferred_time),
             follow_up_summary: followUp,
-            status: 'open'
+            status: 'open',
+            // Seeded from what was heard. An admin reviews and sends it;
+            // nothing goes out automatically.
+            email_to: input.user_email,
+            email_status: 'draft'
           })
           .select('escalation_id')
           .single()
       );
+
+      // Surface the heard contact details for live correction.
+      await captureContact(input.conversation_id, 'escalation', input.user_name, input.user_email);
 
       if (!insert.ok) throw new Error(insert.error);
       const err = (insert.data as { error?: { code?: string; message?: string } }).error;

@@ -69,6 +69,8 @@ export const TOOLS: ToolDefinition[] = [
     description:
       'Open a support ticket so a human can follow up on a specific issue. Call this when the caller ' +
       'has a concrete problem that needs follow-up but does not require immediate human handoff. ' +
+      'If the caller has given you their name and email, pass them as contact_name and contact_email ' +
+      'so they receive a confirmation — ask for them if they have not. ' +
       'Calling it twice for the same issue in one conversation returns the existing ticket.',
     schema: CreateSupportTicketInput,
     handler: createSupportTicket

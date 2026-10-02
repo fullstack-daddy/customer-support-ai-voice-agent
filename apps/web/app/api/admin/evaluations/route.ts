@@ -4,7 +4,8 @@
 // rather than hand-typed, which the brief asks for explicitly.
 
 import { supabaseAdmin, withTimeout } from '@relaypay/shared';
-import { verifyInternalSecret, json } from '@/lib/security.server';
+import { json } from '@/lib/security.server';
+import { requireAdmin } from '@/lib/admin.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,9 +16,9 @@ function csvCell(v: unknown): string {
 }
 
 export async function GET(req: Request): Promise<Response> {
+  const guard = await requireAdmin();
+  if ('error' in guard) return guard.error;
   const url = new URL(req.url);
-  const authError = verifyInternalSecret(req.headers, url);
-  if (authError) return json({ error: 'Unauthorized' }, { status: 401 });
 
   const db = supabaseAdmin();
   const res = await withTimeout('internal: evaluations', () =>
