@@ -2,7 +2,7 @@
   "name": "relaypay-support-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "RelayPay production customer support agent — Vapi voice layer, Claude Agent SDK logic, custom MCP server, Supabase records.",
+  "description": "RelayPay production customer support agent \u2014 Vapi voice layer, Claude Agent SDK logic, custom MCP server, Supabase records.",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:packages": "npm run build --workspace=@relaypay/shared && npm run build --workspace=@relaypay/mcp-server && npm run build --workspace=@relaypay/agent",
     "start": "npm run start --workspace=@relaypay/web",
-    "test": "node scripts/with-env.mjs tsx packages/shared/src/redact-transcript.test.ts && node scripts/with-env.mjs tsx supabase/seed/chunk-kb.test.ts && node scripts/with-env.mjs tsx apps/web/lib/security.server.test.ts"
+    "test": "node scripts/with-env.mjs tsx packages/shared/src/redact-transcript.test.ts && node scripts/with-env.mjs tsx supabase/seed/chunk-kb.test.ts && node scripts/with-env.mjs tsx apps/web/lib/security.server.test.ts && node scripts/with-env.mjs tsx apps/web/lib/transcript-turns.test.ts",
+    "test:agent": "node scripts/with-env.mjs tsx scripts/test-agent-security.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

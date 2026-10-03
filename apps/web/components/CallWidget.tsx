@@ -16,11 +16,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { redactTranscript } from '@relaypay/shared/client';
 import ContactConfirm from './ContactConfirm';
 import { toast } from './Toast';
+import { appendFragment, type Turn } from '@/lib/transcript-turns';
 import { checkWebrtcSupport, explainCallError, toMessage, type PreflightResult } from '@/lib/webrtc-preflight';
 
 type CallState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error' | 'ended';
-
-interface Turn { role: 'user' | 'assistant'; text: string; at: number; }
 
 const LABEL: Record<CallState, string> = {
   idle: 'Not connected',
@@ -104,7 +103,14 @@ export default function CallWidget({
           // Scrub before it reaches the screen. The panel is a real
           // disclosure surface and it is what the download button writes.
           const text = redactTranscript(String(msg.transcript ?? '').trim()).text;
-          if (text) setTurns((prev) => [...prev, { role, text, at: Date.now() }]);
+          // Vapi emits a "final" transcript per sentence, not per
+          // utterance, so appending each one produced a new card for
+          // every sentence the caller or the agent spoke. Fold
+          // consecutive fragments from the same speaker into one card;
+          // a change of speaker, or a long pause, starts a new one.
+          if (text) {
+            setTurns((prev) => appendFragment(prev, role, text, Date.now()));
+          }
           if (role === 'user') setState('thinking');
         }
       });

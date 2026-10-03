@@ -53,7 +53,7 @@ Set these in the Render dashboard (the Blueprint declares them `sync: false`, so
 | `RESEND_API_KEY`, `EMAIL_FROM` | `EMAIL_FROM` must be on a **verified** Resend domain |
 | `ALLOWED_ORIGINS`, `APP_BASE_URL` | Your Render URL |
 | `VOYAGE_API_KEY` *or* `OPENAI_API_KEY` | Optional; without either, retrieval uses Postgres full-text |
-| `CLAUDE_MODEL` | Optional; defaults to `claude-sonnet-4-5` |
+| `CLAUDE_MODEL` | Optional; defaults to `claude-haiku-4-5`. **If you set this to Sonnet it overrides the default and turns get slower** — warm turns averaged 14.6s on Sonnet against 9.2s on Haiku. |
 | `AGENT_TURN_TIMEOUT_MS` | Optional; defaults to 90s |
 
 **`NEXT_PUBLIC_*` variables are baked in at build time.** Adding one after a deploy does nothing until you redeploy. If the call page says "Voice isn't configured" where the variable is clearly set, this is why.

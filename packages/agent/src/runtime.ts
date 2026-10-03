@@ -179,7 +179,13 @@ function agentOptions(systemPrompt: string, maxTurns: number): Record<string, un
     // Plain string = full custom system prompt, no Claude Code preset.
     systemPrompt,
     ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
-    model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5',
+    // Haiku by default: this is a voice line, where latency is part of
+    // correctness. Measured on a warmed session, warm turns averaged
+    // 9.2s against 14.6s for Sonnet, with the same answers, and it held
+    // all four security probes in scripts/test-agent-security.ts
+    // (prompt extraction, tool disclosure, balance invention, authority
+    // bypass). Set CLAUDE_MODEL to override.
+    model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5',
     maxTurns,
     // No human is available to approve a tool call mid-call. Safe
     // because allowedTools is an explicit list of our seven tools.
