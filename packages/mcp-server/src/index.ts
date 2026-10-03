@@ -72,11 +72,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const conversationId = fromEnv || fromArgs;
   const ctx: ToolContext = { conversationId };
 
+  // Overwrite the ARGUMENT too, not just the context.
+  //
+  // Fixing only the context left the audit rows correct while the ticket
+  // and escalation rows themselves still carried the model's invented
+  // id, because every writer reads input.conversation_id. Correcting it
+  // once here is the single point that covers all of them.
+  const effectiveArgs: Record<string, unknown> = { ...(args ?? {}) };
+  if (fromEnv) effectiveArgs.conversation_id = fromEnv;
+
   // Handlers are already total — they catch internally and return
   // structured payloads. This try/catch is the last line of defence
   // against something truly unexpected (OOM, a bug in the wrapper).
   try {
-    const result = await tool.handler(ctx, args ?? {});
+    const result = await tool.handler(ctx, effectiveArgs);
     return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
