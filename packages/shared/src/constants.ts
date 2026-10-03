@@ -76,8 +76,15 @@ export const SUPABASE_RETRIES = 1;
  * persistent host answers in a few seconds, while a cold serverless
  * start has to spawn the MCP subprocess first and can legitimately take
  * much longer on the very first turn of a call.
+ *
+ * Measured locally (Windows, dev server): 34-68s per turn, and 39s for
+ * a turn that calls no tools at all — the cost is the Agent SDK
+ * spawning a subprocess per turn, not the model or the database. 90s
+ * is set so turns complete rather than fail; it is NOT a latency the
+ * caller should ever experience, and Vercel's Hobby tier caps a
+ * function at 60s regardless.
  */
-export const AGENT_TURN_TIMEOUT_MS = Number(process.env.AGENT_TURN_TIMEOUT_MS ?? 45_000);
+export const AGENT_TURN_TIMEOUT_MS = Number(process.env.AGENT_TURN_TIMEOUT_MS ?? 90_000);
 export const MAX_AGENT_TURNS_PER_REQUEST = 12;
 
 // ---- Brand (brand-direction.md, concretised in the build brief) --------

@@ -65,35 +65,99 @@ async function embeddingSearch(query: string): Promise<RawChunk[] | null> {
  * RETRIEVAL_MIN_SCORE threshold would mean two different things
  * depending on which path ran.
  */
-async function lexicalSearch(query: string): Promise<RawChunk[]> {
-  const db = supabaseAdmin();
-  // websearch_to_tsquery tolerates natural phrasing ("how much are fees")
-  // where plainto_tsquery is stricter about operators.
-  const res = await withTimeout('lexical kb search', () =>
-    db
-      .from('knowledge_chunks')
-      .select('id, title, section_path, content')
-      .textSearch('search_tsv', query, { type: 'websearch', config: 'english' })
-      .limit(RETRIEVAL_TOP_K)
-  );
-  if (!res.ok) throw new Error(res.error);
-  const { data, error } = res.data as {
-    data: Omit<RawChunk, 'score'>[] | null;
-    error: { message?: string } | null;
-  };
-  if (error) throw new Error(error.message ?? 'lexical search failed');
-  const rows = data ?? [];
+// Words that carry no retrieval signal. Left out of both the OR query
+// and the overlap score: counting "what" as a miss drags an otherwise
+// good chunk below RETRIEVAL_MIN_SCORE purely for being asked politely.
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'you', 'can', 'does', 'did', 'what', 'when',
+  'how', 'why', 'who', 'with', 'from', 'that', 'this', 'there', 'here',
+  'was', 'were', 'will', 'would', 'could', 'should', 'have', 'has', 'had',
+  'any', 'all', 'but', 'not', 'his', 'her', 'its', 'our', 'your', 'their',
+  'about', 'into', 'over', 'than', 'then', 'them', 'they', 'been', 'being',
+  'much', 'many', 'please', 'tell', 'know', 'get', 'got', 'need', 'want'
+]);
 
-  // Rank by term overlap. Crude next to BM25, but it is honest about its
-  // own confidence, which is what the threshold needs.
+/** Content-bearing terms, lowercased and de-duplicated. */
+function contentTerms(query: string): string[] {
   const terms = query
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 2);
-  return rows.map((r) => {
-    const hay = `${r.title} ${r.content}`.toLowerCase();
-    const hits = terms.filter((t) => hay.includes(t)).length;
-    const score = terms.length ? Math.min(1, hits / terms.length) : 0.5;
+    .filter((t) => t.length > 2 && !STOPWORDS.has(t));
+  return Array.from(new Set(terms));
+}
+
+/**
+ * Lexical path: Postgres full-text ranking over the generated tsvector.
+ *
+ * Two passes. websearch_to_tsquery ANDs every term, which is right when
+ * it matches but fails whole questions: "What fees does RelayPay charge
+ * for international payments?" requires a chunk containing *every* one
+ * of those words, and the fee chunk does not say "international", so a
+ * correct answer sitting in the database returned nothing.
+ *
+ * So if the strict pass finds nothing, retry with the content terms
+ * OR-ed together. Recall goes up, and precision is held by the overlap
+ * score below plus RETRIEVAL_MIN_SCORE — a chunk matching one word out
+ * of five still scores too low to be returned.
+ *
+ * ts_rank returns small absolute numbers, so we normalise into roughly
+ * the same 0-1 band the cosine path produces. Without this the shared
+ * RETRIEVAL_MIN_SCORE threshold would mean two different things
+ * depending on which path ran.
+ */
+async function lexicalSearch(query: string): Promise<RawChunk[]> {
+  const db = supabaseAdmin();
+
+  const run = async (
+    text: string,
+    type: 'websearch' | undefined
+  ): Promise<Omit<RawChunk, 'score'>[]> => {
+    const res = await withTimeout('lexical kb search', () =>
+      db
+        .from('knowledge_chunks')
+        .select('id, title, section_path, content')
+        .textSearch('search_tsv', text, type ? { type, config: 'english' } : { config: 'english' })
+        .limit(RETRIEVAL_TOP_K)
+    );
+    if (!res.ok) throw new Error(res.error);
+    const { data, error } = res.data as {
+      data: Omit<RawChunk, 'score'>[] | null;
+      error: { message?: string } | null;
+    };
+    if (error) throw new Error(error.message ?? 'lexical search failed');
+    return data ?? [];
+  };
+
+  const terms = contentTerms(query);
+
+  let rows = await run(query, 'websearch');
+  if (rows.length === 0 && terms.length > 0) {
+    // Raw tsquery (no `type`) so the | operator is honoured.
+    rows = await run(terms.join(' | '), undefined);
+  }
+
+  if (rows.length === 0) return [];
+
+  const hays = rows.map((r) => `${r.title} ${r.content}`.toLowerCase());
+
+  // Score against the terms the corpus can actually answer, not every
+  // word the caller said.
+  //
+  // "can you guarantee my payout arrives tomorrow morning" has five
+  // content terms, but "arrives", "tomorrow" and "morning" appear in no
+  // chunk at all. Dividing by five scored the correct no-guarantee
+  // policy at 0.2 and RETRIEVAL_MIN_SCORE discarded it — the right
+  // answer was in the database and the agent said it could not help.
+  //
+  // Terms that match nothing carry no signal about which chunk is best,
+  // so they are excluded from the denominator. Precision still holds:
+  // when nothing matches at all, rows is empty and found stays false.
+  const answerable = terms.filter((t) => hays.some((h) => h.includes(t)));
+  const denominator = answerable.length || terms.length;
+
+  return rows.map((r, i) => {
+    const hits = answerable.filter((t) => hays[i]!.includes(t)).length;
+    const score = denominator ? Math.min(1, hits / denominator) : 0.5;
     return { ...r, score };
   }).sort((a, b) => b.score - a.score);
 }
