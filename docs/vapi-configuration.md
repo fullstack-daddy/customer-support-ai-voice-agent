@@ -75,10 +75,41 @@ Vapi authenticates the model endpoint and the Server URL independently, and
 they are configured in different places. Both must carry the same string as
 `VAPI_SERVER_SECRET` on the server.
 
-| Log line | Which field is wrong |
+| Log line | What to fix |
 | --- | --- |
-| `[vapi] rejected request: secret mismatch (sent via authorization)` | **Model → API key / secret.** Vapi sent something, but not the right value. |
-| `[end-of-call] rejected: missing secret header (auth headers seen: none)` | **Advanced → Server URL Secret** is empty. Vapi sent no credential at all. |
+| `secret mismatch (values sent via authorization)` | The **custom-llm credential** holds the wrong value — see below. |
+| `[end-of-call] ... secret header present but empty` | **Advanced → Server URL Secret** is blank. |
+| `[end-of-call] ... no auth headers at all` | Vapi is sending nothing; the Server URL has no secret configured. |
+
+### The Authorization header comes from a credential, not the assistant
+
+Vapi's schema is explicit: custom headers "can override default OpenAI headers
+**except for Authorization (which should be specified using a custom-llm
+credential)**". So the value arriving in `authorization` comes from a stored
+credential in your Vapi account, not from a field on the assistant. Editing the
+assistant will not change it.
+
+Two ways to make it match `VAPI_SERVER_SECRET`:
+
+**Set the credential** — in the Vapi dashboard, find the custom-llm provider
+credential the assistant uses and set its API key to the secret.
+
+**Or send it as a custom header instead**, which avoids the credential entirely.
+This endpoint accepts `x-vapi-secret`, and `headers` *can* set that one:
+
+```bash
+curl -X PATCH https://api.vapi.ai/assistant/<assistant-id>   -H "Authorization: Bearer <your-vapi-private-key>"   -H "Content-Type: application/json"   -d '{
+    "model": {
+      "provider": "custom-llm",
+      "model": "relaypay-support-agent",
+      "url": "https://<your-host>/api/vapi",
+      "timeoutSeconds": 120,
+      "headers": { "x-vapi-secret": "<your VAPI_SERVER_SECRET>" }
+    }
+  }'
+```
+
+A PATCH replaces the whole `model` object, so include every field you want kept.
 
 A burst of `end-of-call` rejections per call is normal when the secret is
 missing: Vapi posts several message types (status updates, transcripts,
