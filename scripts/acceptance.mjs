@@ -200,19 +200,35 @@ async function main() {
   console.log('');
   console.log('Opening call C...');
   await openCall(C);
-  const qC =
+  // Escalation is deliberately two turns: the agent confirms contact
+  // details and a callback preference before raising anything. A
+  // single-turn assertion failed here for the right reason, so the test
+  // now plays the exchange out.
+  const qC1 =
     'I have been waiting three weeks on a compliance review and nobody has replied. ' +
     'I want this escalated to a human specialist now. I am Dayo Ade, dayo@example.com.';
-  const rC = await post({ call: { id: C }, messages: [{ role: 'user', content: qC }] });
+  const rC1 = await post({ call: { id: C }, messages: [{ role: 'user', content: qC1 }] });
+
+  const qC2 = 'No callback needed, just escalate it now please.';
+  const rC2 = await post({
+    call: { id: C },
+    messages: [
+      { role: 'user', content: qC1 },
+      { role: 'assistant', content: rC1.reply },
+      { role: 'user', content: qC2 }
+    ]
+  });
   record({
     test: 'Human escalation',
-    asked: qC,
-    reply: rC.reply,
-    elapsed: rC.elapsed,
-    degraded: rC.degraded,
+    asked: qC1 + '  ->  ' + qC2,
+    reply: rC1.reply + '  ||  ' + rC2.reply,
+    elapsed: rC1.elapsed + rC2.elapsed,
+    degraded: rC2.degraded,
     conversation: C,
-    expected: 'Escalates to a human without promising a timeline',
-    passed: /specialist|escalat|human|team/i.test(rC.reply)
+    expected: 'Confirms contact details, then escalates without promising a timeline',
+    passed:
+      /specialist|escalat|human|team/i.test(rC2.reply) &&
+      !/within \d|by (tomorrow|monday|friday)|in \d+ (hours|days)/i.test(rC2.reply)
   });
 
   await closeCall(C);

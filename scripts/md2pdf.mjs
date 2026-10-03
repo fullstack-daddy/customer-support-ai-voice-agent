@@ -39,14 +39,19 @@ const md = fs.readFileSync(inFile, 'utf8');
 const bodyHtml = mdToHtml(md);
 const derivedTitle = extractH1(md) || path.basename(inFile, '.md').replace(/[_-]/g, ' ');
 const title = opts.title || derivedTitle;
-const eyebrow = opts.eyebrow || 'Koya Lead Agent · Week 5';
-const footer = opts.footer || 'Koya Lead Agent · Emmanuel Aboyeji · Week 5 · 2026-09-25';
+const eyebrow = opts.eyebrow || 'RelayPay Support Agent · Week 6';
+const footer = opts.footer || 'RelayPay Support Agent · Emmanuel Aboyeji · Week 6 · 2026-10-03';
 
 const html = pageTemplate({ title, eyebrow, footer, bodyHtml, style });
 
 // Write HTML to a temp file so Chrome can load it via file://.
 const tmpHtml = path.join(os.tmpdir(), `koya-md2pdf-${crypto.randomBytes(6).toString('hex')}.html`);
 fs.writeFileSync(tmpHtml, html);
+if (process.env.MD2PDF_KEEP_HTML) {
+  const side = outFile.replace(/\.pdf$/, '.preview.html');
+  fs.writeFileSync(side, html);
+  console.log('kept HTML at ' + side);
+}
 
 const args = [
   '--headless=new',
@@ -206,7 +211,7 @@ function pageTemplate({ title, eyebrow, footer, bodyHtml, style }) {
 <body>
   <div class="page">
     <header class="masthead">
-      <div class="brand">Koya <em>Lead</em> Agent</div>
+      <div class="brand">RelayPay <em>Support</em> Agent</div>
       <div class="eyebrow">${escHtml(eyebrow)}</div>
     </header>
     <main>

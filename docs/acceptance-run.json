@@ -1,0 +1,90 @@
+[
+  {
+    "test": "Knowledge-grounded answer",
+    "asked": "What fees does RelayPay charge for sending money?",
+    "reply": "Fees vary based on the corridor, the payment method, and transaction type. RelayPay shows you the exact fees before you confirm any transaction, so you'll see what you're paying upfront.\n\nIs there a specific payment route you're looking at? I can help you understand what affects the cost.",
+    "expected": "Answer drawn from the knowledge base, naming what fees depend on",
+    "elapsed": 14.265,
+    "degraded": null,
+    "passed": true,
+    "conversation": "acc-a-1791049176132"
+  },
+  {
+    "test": "Clarifying question",
+    "asked": "My payment has not arrived yet.",
+    "reply": "Is this a payment you sent out to someone, or a payment you were expecting to receive?",
+    "expected": "Asks a question back rather than guessing or inventing a status",
+    "elapsed": 5.731,
+    "degraded": null,
+    "passed": true,
+    "conversation": "acc-a-1791049176132"
+  },
+  {
+    "test": "Transaction lookup",
+    "asked": "The reference is TXN-9001. What is its status?",
+    "reply": "Your payout TXN-9001 for 2400 US dollars is showing as processing. The estimated arrival was the 19th of August, which is now more than a month ago.\n\nThis needs a specialist to review. Let me arrange for someone to look into what's happening with this payment. Can I get your name and email address?",
+    "expected": "Returns facts from the seeded row (processing; 2400 USD; arrival 19 Aug)",
+    "elapsed": 14.131,
+    "degraded": null,
+    "passed": true,
+    "conversation": "acc-a-1791049176132"
+  },
+  {
+    "test": "Customer lookup",
+    "asked": "I am customer CUS-1001. Can you confirm my account is in good standing?",
+    "reply": "I need to get your name and email address so a specialist can verify who you are and review your account along with the payment issue. What's the best way to contact you?",
+    "expected": "Looks the customer up rather than inventing an answer",
+    "elapsed": 8.315,
+    "degraded": null,
+    "passed": true,
+    "conversation": "acc-a-1791049176132"
+  },
+  {
+    "test": "Unsupported question",
+    "asked": "What will the weather be like in Lagos tomorrow?",
+    "reply": "I'm here to help with RelayPay support. Let's get your late payment sorted \u2014 I just need your name and email so a specialist can follow up on transaction TXN-9001.",
+    "expected": "Declines and redirects rather than answering from general knowledge",
+    "elapsed": 4.139,
+    "degraded": null,
+    "passed": true,
+    "conversation": "acc-a-1791049176132"
+  },
+  {
+    "test": "Ticket creation",
+    "asked": "My invoices are not generating for my EUR clients. Please raise a support ticket. My name is Dayo Ade and my email is dayo@example.com.",
+    "reply": "Done. I've created support ticket TICKET-3061627C for your invoice generation issue. You'll receive a confirmation at dayo@example.com, and our team will investigate why invoices aren't generating for your EUR clients.",
+    "elapsed": 20.181,
+    "degraded": null,
+    "conversation": "acc-b-1791049256341",
+    "expected": "Creates a ticket and reads back a TICKET- reference",
+    "passed": true
+  },
+  {
+    "test": "Human escalation",
+    "asked": "I have been waiting three weeks on a compliance review and nobody has replied. I want this escalated to a human specialist now. I am Dayo Ade, dayo@example.com.  ->  No callback needed, just escalate it now please.",
+    "reply": "I'm ready to escalate this. What time would work best for a specialist to call you back, or would you prefer we just proceed with the escalation without scheduling a specific time?  ||  Done. Your escalation reference is ESC-E31B9D5B. A RelayPay specialist will follow up at the email address you provided. Thank you for your patience, Dayo.",
+    "elapsed": 32.476,
+    "degraded": null,
+    "conversation": "acc-c-1791049309947",
+    "expected": "Confirms contact details, then escalates without promising a timeline",
+    "passed": true
+  },
+  {
+    "test": "Voice flow (transport)",
+    "asked": "greeting -> streamed turn -> end-of-call webhook",
+    "reply": "greeting 0.42s; streamed reply \"Yes, I'm here. I'm the RelayPay customer support agent. How can I help\"; end-of-call HTTP 200",
+    "expected": "Greeting returns immediately, the turn streams, the webhook accepts the report",
+    "elapsed": 14.86,
+    "conversation": "acc-v-1791049376184",
+    "passed": true
+  },
+  {
+    "test": "Logging",
+    "asked": "Supabase rows written by the runs above",
+    "reply": "conversations 4, turns 16, tool_calls 9, tickets 1, escalations 1",
+    "expected": "Every conversation, turn and tool call persisted",
+    "elapsed": 0,
+    "conversation": "-",
+    "passed": true
+  }
+]
