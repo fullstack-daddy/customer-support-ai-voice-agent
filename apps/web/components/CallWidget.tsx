@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { redactTranscript } from '@relaypay/shared/client';
 import ContactConfirm from './ContactConfirm';
 import { toast } from './Toast';
-import { checkWebrtcSupport, explainCallError, type PreflightResult } from '@/lib/webrtc-preflight';
+import { checkWebrtcSupport, explainCallError, toMessage, type PreflightResult } from '@/lib/webrtc-preflight';
 
 type CallState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error' | 'ended';
 
@@ -109,14 +109,17 @@ export default function CallWidget({
         }
       });
 
-      vapi.on('error', (e: any) => {
-        setError(String(e?.message ?? e?.error?.message ?? 'The call failed unexpectedly.'));
+      vapi.on('error', (e: unknown) => {
+        // Keep the raw object in the console: whatever we render is a
+        // best-effort reading of a shape Vapi does not document.
+        console.error('[vapi] error event', e);
+        setError(explainCallError(toMessage(e)));
         setState('error');
       });
 
       await vapi.start(assistantId!);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = toMessage(e);
       // Turn DOMExceptions and Daily's opaque "WebRTC not supported or
       // suppressed" into something the caller can actually act on.
       setError(explainCallError(message));

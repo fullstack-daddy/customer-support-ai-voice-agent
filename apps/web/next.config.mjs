@@ -49,6 +49,26 @@ const nextConfig = {
   env: publicEnv,
   // The monorepo root holds the workspace packages this app imports.
   outputFileTracingRoot: ROOT,
+  // Files the agent reaches at RUNTIME, which static tracing cannot see.
+  //
+  // The agent spawns the MCP server by building its path at run time, so
+  // nothing imports packages/mcp-server/dist and Next leaves it out of
+  // the serverless bundle. The spawn then fails instantly — a turn that
+  // dies in ~3s rather than timing out — and the caller hears the
+  // generic "I'm having trouble" line. The Agent SDK is listed for the
+  // same reason: it unpacks its CLI from files it reads at run time.
+  outputFileTracingIncludes: {
+    '/api/vapi': [
+      '../../packages/mcp-server/dist/**',
+      '../../packages/shared/dist/**',
+      '../../node_modules/@anthropic-ai/claude-agent-sdk/**'
+    ],
+    '/api/vapi/chat/completions': [
+      '../../packages/mcp-server/dist/**',
+      '../../packages/shared/dist/**',
+      '../../node_modules/@anthropic-ai/claude-agent-sdk/**'
+    ]
+  },
   async headers() {
     return [
       {

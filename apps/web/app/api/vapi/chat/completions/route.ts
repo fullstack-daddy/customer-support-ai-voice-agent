@@ -175,10 +175,21 @@ export async function POST(req: Request): Promise<Response> {
   // Vapi normally asks for a stream. Honour whatever it asked for:
   // sending a plain JSON body to a client expecting SSE makes the
   // assistant stay silent for the entire turn.
-  const respond = (text: string) =>
-    body.stream === true
-      ? sseCompletion(text, model, conversationId)
-      : json(completion(text, model, conversationId));
+  // Why a turn degraded, for the authenticated caller only.
+  //
+  // The spoken reply is deliberately vague — a caller must not hear
+  // internals. But a failure that reads as "I'm having trouble" in audio
+  // is almost impossible to diagnose from outside, and serverless logs
+  // are not always to hand. This header is visible only to someone who
+  // already holds VAPI_SERVER_SECRET, and Vapi ignores it.
+  const respond = (text: string, degraded?: string) => {
+    const res =
+      body.stream === true
+        ? sseCompletion(text, model, conversationId)
+        : json(completion(text, model, conversationId));
+    if (degraded) res.headers.set('x-relaypay-degraded', degraded.slice(0, 200));
+    return res;
+  };
 
   // The last user message is the turn to answer. Anything before it is
   // context. Vapi's own system message is dropped — our system prompt
@@ -229,14 +240,15 @@ export async function POST(req: Request): Promise<Response> {
       console.warn(`[vapi] degraded turn on ${conversationId}: ${result.degraded}`);
     }
 
-    return respond(result.text);
+    return respond(result.text, result.degraded);
   } catch (e) {
     // Never hang or 500 back to Vapi — a 500 makes the assistant go
     // silent mid-call, which is the worst possible caller experience.
     // Speak a graceful fallback instead.
     console.error(`[vapi] turn threw on ${conversationId}: ${e instanceof Error ? e.message : e}`);
     return respond(
-      "I'm sorry, I'm having trouble on my end right now. Let me arrange for a specialist to follow up with you — could I take your name and email address?"
+      "I'm sorry, I'm having trouble on my end right now. Let me arrange for a specialist to follow up with you — could I take your name and email address?",
+      e instanceof Error ? e.message : String(e)
     );
   }
 }

@@ -83,3 +83,39 @@ export function explainCallError(message: string): string {
   }
   return message;
 }
+
+/**
+ * Get a human-readable string out of whatever was thrown or emitted.
+ *
+ * Vapi's error events are not Error instances: the payload is often an
+ * object, and sometimes `message` is itself an object. String() on that
+ * yields "[object Object]", which is what the caller used to see in
+ * place of the actual fault.
+ */
+export function toMessage(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e instanceof Error && e.message) return e.message;
+
+  if (e && typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    // Walk the shapes Vapi and Daily actually use, in order.
+    for (const key of ['message', 'errorMsg', 'error', 'reason', 'type']) {
+      const v = o[key];
+      if (typeof v === 'string' && v.trim()) return v;
+      if (v && typeof v === 'object') {
+        const nested = toMessage(v);
+        if (nested && nested !== UNKNOWN) return nested;
+      }
+    }
+    // Last resort: show the shape rather than "[object Object]".
+    try {
+      const json = JSON.stringify(e);
+      if (json && json !== '{}') return json.slice(0, 300);
+    } catch {
+      // Circular. Fall through.
+    }
+  }
+  return UNKNOWN;
+}
+
+const UNKNOWN = 'The call failed unexpectedly.';
