@@ -13,7 +13,7 @@
 // Node runtime, NOT Edge — the Agent SDK spawns the MCP server as a
 // child process, which Edge cannot do.
 
-import { runAgentTurn } from '@relaypay/agent';
+import { runAgentTurn, warmAgentSession } from '@relaypay/agent';
 import { redactTranscript } from '@relaypay/shared';
 import { verifyVapiRequest, rateLimit, clientKey, json } from '@/lib/security.server';
 
@@ -187,8 +187,13 @@ export async function POST(req: Request): Promise<Response> {
   const lastUserIdx = conversational.map((m) => m.role).lastIndexOf('user');
 
   if (lastUserIdx === -1) {
-    // No user turn yet (Vapi sometimes probes on connect). Return the
-    // greeting rather than running the agent for nothing.
+    // No user turn yet (Vapi probes on connect). This is the moment to
+    // start the agent subprocess: the caller is about to hear the
+    // greeting, which buys several seconds of spawn time that would
+    // otherwise be added to their first question.
+    warmAgentSession(conversationId);
+
+    // Return the greeting rather than running the agent for nothing.
     return respond(
       'Hi, thanks for calling RelayPay support. This call may be recorded for quality and support purposes. How can I help today?'
     );

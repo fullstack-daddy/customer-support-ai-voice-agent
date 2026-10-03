@@ -24,7 +24,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_TURN_TIMEOUT_MS, MAX_AGENT_TURNS_PER_REQUEST, type AnswerType } from '@relaypay/shared';
-import { buildSystemPrompt } from './system-prompt.js';
+import { buildSystemPrompt, buildStateNotes } from './system-prompt.js';
+import { getSession, disposeSession, registerOptionsBuilder, warmSession } from './session.js';
 import { loadConversationState, rememberCustomer } from './state.js';
 import { writeTurn, deriveAnswerType, accumulateUsage, markRetrievalUsed } from './turns.js';
 import { ensureConversation } from '@relaypay/mcp-server/tools';
@@ -138,6 +139,134 @@ function buildPrompt(input: AgentTurnInput): string {
   );
 }
 
+interface Accumulator {
+  text: string;
+  toolsCalled: { name: string; input: Record<string, unknown> }[];
+  retrievalFound: boolean | null;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  degraded?: string;
+}
+
+/**
+ * The SDK option set, shared by the warm and cold paths so a session
+ * behaves identically to a one-shot turn. The abort controller is NOT
+ * here: aborting is per-turn on the cold path, but on a session it would
+ * kill the subprocess the next turn depends on.
+ */
+function agentOptions(systemPrompt: string, maxTurns: number): Record<string, unknown> {
+  return {
+    // Plain string = full custom system prompt, no Claude Code preset.
+    systemPrompt,
+    model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5',
+    maxTurns,
+    // No human is available to approve a tool call mid-call. Safe
+    // because allowedTools is an explicit list of our seven tools.
+    permissionMode: 'bypassPermissions',
+    allowedTools: ALLOWED_TOOLS,
+    // Belt and braces: strip the built-in toolset so the agent has no
+    // filesystem, shell, or network access beyond our MCP server.
+    disallowedTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit'],
+    mcpServers: {
+      [MCP_SERVER_NAME]: {
+        type: 'stdio',
+        command: process.execPath,      // the running node binary
+        args: [mcpEntrypoint()],
+        env: {
+          SUPABASE_URL: process.env.SUPABASE_URL ?? '',
+          SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+          ...(process.env.VOYAGE_API_KEY ? { VOYAGE_API_KEY: process.env.VOYAGE_API_KEY } : {}),
+          ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {})
+        }
+      }
+    }
+  };
+}
+
+// session.ts needs these options but must not import this module back.
+registerOptionsBuilder(agentOptions);
+
+/**
+ * Fold one SDK message into the accumulator.
+ *
+ * Returns true when the turn is finished. On a session the stream does
+ * not end between turns, so `result` is the only signal that this
+ * caller's turn is complete.
+ */
+function collect(message: SDKMessageLike, acc: Accumulator): boolean {
+  if (message.type === 'assistant') {
+    const content = (message as unknown as { message: { content: unknown[] } }).message?.content ?? [];
+    for (const block of content as { type: string; text?: string; name?: string; input?: unknown }[]) {
+      if (block.type === 'text' && block.text) {
+        // Later text blocks supersede earlier ones — the last one is
+        // what the model settled on after its tool calls.
+        acc.text = block.text;
+      }
+      if (block.type === 'tool_use' && block.name) {
+        const bare = block.name.replace(`mcp__${MCP_SERVER_NAME}__`, '');
+        acc.toolsCalled.push({ name: bare, input: (block.input ?? {}) as Record<string, unknown> });
+      }
+    }
+  }
+
+  // Tool results come back as user-role messages; sniff the retrieval
+  // outcome so we can classify the answer type accurately.
+  if (message.type === 'user') {
+    const content = (message as unknown as { message: { content: unknown } }).message?.content;
+    const raw = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+    if (/"retrieval_mode"/.test(raw)) {
+      acc.retrievalFound = /"found"\s*:\s*true/.test(raw);
+    }
+  }
+
+  if (message.type === 'result') {
+    const r = message as unknown as {
+      total_cost_usd?: number;
+      usage?: { input_tokens?: number; output_tokens?: number };
+      is_error?: boolean;
+      subtype?: string;
+    };
+    acc.costUsd = r.total_cost_usd ?? 0;
+    acc.inputTokens = r.usage?.input_tokens ?? 0;
+    acc.outputTokens = r.usage?.output_tokens ?? 0;
+    // A result message is not automatically a success.
+    if (r.is_error || (r.subtype && r.subtype !== 'success')) {
+      acc.degraded = `agent result: ${r.subtype ?? 'error'}`;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+type SDKMessageLike = { type: string } & Record<string, unknown>;
+
+/**
+ * A session serves a whole call, so its turn budget is the per-turn
+ * budget several times over. Exceeding it surfaces as a result subtype
+ * of error_max_turns, which disposes the session and sends the next
+ * turn down the cold path.
+ */
+const SESSION_MAX_TURNS = MAX_AGENT_TURNS_PER_REQUEST * 8;
+
+/**
+ * Start the subprocess for a call before the caller has said anything.
+ *
+ * Call this the moment a call begins — on the greeting, or earlier from
+ * the client. It returns immediately; the spawn overlaps with whatever
+ * the caller is listening to. Safe to call repeatedly: a conversation
+ * that already has a session keeps it.
+ *
+ * The session is created with the BASE prompt only, because escalation,
+ * tickets and caller identity are not known yet. runAgentTurn sends
+ * those as per-turn notes instead.
+ */
+export function warmAgentSession(conversationId: string): void {
+  const blank = { conversationId, escalated: false, ticketIds: [], knownCustomerId: null, turnCount: 0 };
+  warmSession(conversationId, buildSystemPrompt(blank), SESSION_MAX_TURNS);
+}
+
 export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResult> {
   const { conversationId } = input;
   await ensureConversation(conversationId, input.channel ?? 'text_eval');
@@ -165,85 +294,85 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
   const toolsCalled: { name: string; input: Record<string, unknown> }[] = [];
   let retrievalFound: boolean | null = null;
 
+  const acc: Accumulator = {
+    text: '',
+    toolsCalled: [],
+    retrievalFound: null,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    degraded: undefined
+  };
+
   try {
-    const stream = query({
-      prompt: buildPrompt(input),
-      options: {
-        // Plain string = full custom system prompt, no Claude Code preset.
-        systemPrompt,
-        model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5',
-        maxTurns: MAX_AGENT_TURNS_PER_REQUEST,
-        abortController: controller,
-        // No human is available to approve a tool call mid-call. Safe
-        // because allowedTools is an explicit list of our seven tools.
-        permissionMode: 'bypassPermissions',
-        allowedTools: ALLOWED_TOOLS,
-        // Belt and braces: strip the built-in toolset so the agent has no
-        // filesystem, shell, or network access beyond our MCP server.
-        disallowedTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit'],
-        mcpServers: {
-          [MCP_SERVER_NAME]: {
-            type: 'stdio',
-            command: process.execPath,      // the running node binary
-            args: [mcpEntrypoint()],
-            env: {
-              SUPABASE_URL: process.env.SUPABASE_URL ?? '',
-              SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
-              ...(process.env.VOYAGE_API_KEY ? { VOYAGE_API_KEY: process.env.VOYAGE_API_KEY } : {}),
-              ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {})
-            }
-          }
-        }
-      }
-    });
+    const session = getSession(conversationId);
 
-    for await (const message of stream) {
-      if (message.type === 'assistant') {
-        const content = (message as { message: { content: unknown[] } }).message?.content ?? [];
-        for (const block of content as { type: string; text?: string; name?: string; input?: unknown }[]) {
-          if (block.type === 'text' && block.text) {
-            // Later text blocks supersede earlier ones — the last one is
-            // what the model settled on after its tool calls.
-            text = block.text;
-          }
-          if (block.type === 'tool_use' && block.name) {
-            const bare = block.name.replace(`mcp__${MCP_SERVER_NAME}__`, '');
-            toolsCalled.push({ name: bare, input: (block.input ?? {}) as Record<string, unknown> });
-          }
-        }
-      }
+    if (session && !session.busy) {
+      // Warm path: the subprocess is already up. Send only what is new —
+      // the session holds the conversation, so replaying history here
+      // would duplicate it.
+      session.busy = true;
+      try {
+        const notes = buildStateNotes(state);
+        const seed = session.turnsServed === 0 ? buildPrompt(input) : input.userMessage;
+        session.input.push(notes ? `${notes}
 
-      // Tool results come back as user-role messages; sniff the retrieval
-      // outcome so we can classify the answer type accurately.
-      if (message.type === 'user') {
-        const content = (message as { message: { content: unknown } }).message?.content;
-        const raw = typeof content === 'string' ? content : JSON.stringify(content ?? '');
-        if (/"retrieval_mode"/.test(raw)) {
-          retrievalFound = /"found"\s*:\s*true/.test(raw);
-        }
-      }
+${seed}` : seed);
 
-      if (message.type === 'result') {
-        const r = message as {
-          total_cost_usd?: number;
-          usage?: { input_tokens?: number; output_tokens?: number };
-          is_error?: boolean;
-          subtype?: string;
-        };
-        costUsd = r.total_cost_usd ?? 0;
-        inputTokens = r.usage?.input_tokens ?? 0;
-        outputTokens = r.usage?.output_tokens ?? 0;
-        // A result message is not automatically a success.
-        if (r.is_error || (r.subtype && r.subtype !== 'success')) {
-          degraded = `agent result: ${r.subtype ?? 'error'}`;
+        while (true) {
+          const next = await Promise.race([
+            session.stream.next(),
+            new Promise<'timeout'>((resolve) =>
+              setTimeout(() => resolve('timeout'), AGENT_TURN_TIMEOUT_MS)
+            )
+          ]);
+
+          if (next === 'timeout') {
+            // The subprocess is mid-turn and cannot be rewound, so the
+            // session is no longer trustworthy. Drop it; the next turn
+            // starts a fresh one.
+            void disposeSession(conversationId, 'turn timeout');
+            throw new Error(`timeout after ${AGENT_TURN_TIMEOUT_MS}ms`);
+          }
+          if (next.done) break;
+          if (collect(next.value, acc)) break;
         }
+
+        session.turnsServed += 1;
+        session.lastUsed = Date.now();
+
+        // A session that has spent its turn budget cannot serve another
+        // one, so retire it rather than failing every later turn.
+        if (acc.degraded && /max_turns/i.test(acc.degraded)) {
+          void disposeSession(conversationId, 'turn budget exhausted');
+        }
+      } finally {
+        session.busy = false;
+      }
+    } else {
+      // Cold path: one subprocess for this turn only. Correct, just slow.
+      const stream = query({
+        prompt: buildPrompt(input),
+        options: { ...agentOptions(systemPrompt, MAX_AGENT_TURNS_PER_REQUEST), abortController: controller }
+      });
+      for await (const message of stream) {
+        if (collect(message, acc)) break;
       }
     }
+
+    text = acc.text;
+    costUsd = acc.costUsd;
+    inputTokens = acc.inputTokens;
+    outputTokens = acc.outputTokens;
+    retrievalFound = acc.retrievalFound;
+    toolsCalled.push(...acc.toolsCalled);
+    degraded = acc.degraded;
 
     if (!text.trim()) {
       degraded = degraded ?? 'model produced no text';
       text = FALLBACK_TEXT;
     }
+
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     degraded = /abort/i.test(message) ? `timeout after ${AGENT_TURN_TIMEOUT_MS}ms` : message;

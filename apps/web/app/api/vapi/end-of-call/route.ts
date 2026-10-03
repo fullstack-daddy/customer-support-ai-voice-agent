@@ -9,6 +9,7 @@
 
 import { supabaseAdmin, withTimeout } from '@relaypay/shared';
 import { verifyVapiRequest, json } from '@/lib/security.server';
+import { disposeSession } from '@relaypay/agent';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,6 +77,11 @@ export async function POST(req: Request): Promise<Response> {
     return json({ ok: false, reason: 'no call id' });
   }
   const conversationId = `vapi-${callId}`;
+
+  // The call is over, so the agent subprocess for it is dead weight.
+  // Sessions also expire on idle, but that would keep a subprocess
+  // alive for minutes after every call for no reason.
+  void disposeSession(conversationId, 'call ended');
 
   const summary = pick(msg.analysis?.summary, msg.artifact?.summary, msg.summary);
   const endedReason = pick(msg.endedReason);

@@ -96,8 +96,16 @@ This is a voice conversation. Your words are read aloud.
  * escalated will happily keep troubleshooting, which escalation-rules.md
  * explicitly forbids — so we re-assert it every turn from the database.
  */
-export function buildSystemPrompt(state: ConversationState): string {
-  const parts = [BASE];
+/**
+ * The state-dependent half of the prompt.
+ *
+ * Split out because a warmed session fixes its system prompt when the
+ * subprocess starts, before any of this is known. The session path sends
+ * these notes with each turn instead, so behaviour matches the one-shot
+ * path exactly.
+ */
+export function buildStateNotes(state: ConversationState): string {
+  const parts: string[] = [];
 
   if (state.escalated) {
     parts.push(
@@ -127,6 +135,11 @@ export function buildSystemPrompt(state: ConversationState): string {
   }
 
   return parts.join('\n');
+}
+
+export function buildSystemPrompt(state: ConversationState): string {
+  const notes = buildStateNotes(state);
+  return notes ? `${BASE}\n${notes}` : BASE;
 }
 
 export const SYSTEM_PROMPT_BASE = BASE;
