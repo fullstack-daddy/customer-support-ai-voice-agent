@@ -9,12 +9,13 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@relaypay/web",
-    "build": "npm run build --workspace=@relaypay/shared && npm run build --workspace=@relaypay/mcp-server && npm run build --workspace=@relaypay/agent && npm run build --workspace=@relaypay/web",
+    "build": "npm run build --workspace=@relaypay/web",
     "seed": "node scripts/with-env.mjs tsx supabase/seed/load.ts",
     "eval": "node scripts/with-env.mjs tsx scripts/eval/run-scenarios.ts",
     "mcp:smoke": "node scripts/with-env.mjs tsx packages/mcp-server/scripts/smoke-test.ts",
     "check:secrets": "node scripts/check-secrets.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:packages": "npm run build --workspace=@relaypay/shared && npm run build --workspace=@relaypay/mcp-server && npm run build --workspace=@relaypay/agent"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

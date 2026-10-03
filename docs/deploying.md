@@ -27,13 +27,15 @@ Import the repo, then in **Settings → General**:
 | Setting | Value |
 | --- | --- |
 | Framework Preset | Next.js |
-| Root Directory | **leave as the repo root** — *not* `apps/web` |
+| Root Directory | repo root **or** `apps/web` — both work |
 | Build Command | `npm run build` |
 | Output Directory | `apps/web/.next` |
 | Install Command | `npm install` |
 | Node.js Version | 20.x or later |
 
-Root Directory is the one people get wrong. This is an npm-workspaces monorepo: the web app imports `@relaypay/shared`, `@relaypay/agent` and `@relaypay/mcp-server`, which only exist if the install runs from the root. Point Vercel at `apps/web` and the build fails on unresolved workspace packages.
+This is an npm-workspaces monorepo: the web app imports `@relaypay/shared`, `@relaypay/agent` and `@relaypay/mcp-server`, and those packages have to be **compiled** before Next can resolve them — their `exports` point at `dist/`, which does not exist in a fresh clone.
+
+Vercel only runs the build script of the app it detects, so with Root Directory set to `apps/web` it ran `next build` alone and failed with `Module not found: Can't resolve '@relaypay/shared'`. The web package now has a `prebuild` hook that compiles the workspace packages first, so either Root Directory setting works.
 
 `vercel.json` in the repo already sets the build commands and the 60-second `maxDuration` on the chat-completions route, so most of this is applied for you.
 
@@ -111,7 +113,7 @@ Then point the assistant's custom-llm URL at the ngrok address. It changes every
 | Symptom | Cause |
 | --- | --- |
 | "Voice isn't configured" despite the env being set | `NEXT_PUBLIC_*` is build-time. Redeploy (Vercel) or restart the dev server (local). Locally, also check the `.env` is at the **repo root**. |
-| Build fails on `@relaypay/shared` not found | Root Directory is set to `apps/web`. Set it to the repo root. |
+| Build fails on `@relaypay/shared` not found | The workspace packages were not compiled. `apps/web`'s `prebuild` hook does this; if you changed the build command, make sure it still runs `npm run build:packages`. |
 | Agent replies but calls no tools | Workspace packages not built. `npm run build`. |
 | "WebRTC not supported or suppressed" when starting a call | The page is open on a plain-http address that is not loopback, e.g. `http://192.168.x.x:3000`. Browsers only expose the microphone in a secure context. Use `http://localhost:3000`, or serve over https. The app now detects this up front and says so instead of failing on click. |
 | Vapi gets 401 | `VAPI_SERVER_SECRET` differs between the deployment and the assistant settings. |

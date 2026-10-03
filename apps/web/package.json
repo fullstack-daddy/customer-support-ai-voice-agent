@@ -6,7 +6,8 @@
     "dev": "node ../../scripts/with-env.mjs next dev",
     "build": "node ../../scripts/with-env.mjs next build",
     "start": "node ../../scripts/with-env.mjs next start",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prebuild": "npm --prefix ../.. run build:packages"
   },
   "dependencies": {
     "@relaypay/agent": "*",
