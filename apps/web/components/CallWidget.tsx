@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { redactTranscript } from '@relaypay/shared';
 import ContactConfirm from './ContactConfirm';
 import { toast } from './Toast';
+import { checkWebrtcSupport, explainCallError, type PreflightResult } from '@/lib/webrtc-preflight';
 
 type CallState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error' | 'ended';
 
@@ -43,6 +44,9 @@ export default function CallWidget({
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  // Browser capability, resolved in the browser. Null until then, so the
+  // server and the first client render agree.
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
 
   const vapiRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -55,6 +59,10 @@ export default function CallWidget({
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns]);
 
+  // Whether this browser can do WebRTC at all. Checked up front so the
+  // Start button is honest rather than failing on click.
+  useEffect(() => { setPreflight(checkWebrtcSupport()); }, []);
+
   // Release the microphone if the component unmounts mid-call.
   useEffect(() => () => { try { vapiRef.current?.stop?.(); } catch { /* already gone */ } }, []);
 
@@ -63,6 +71,15 @@ export default function CallWidget({
     setTurns([]);
     setConversationId(null);
     setState('connecting');
+
+    // Re-check rather than trusting the mount-time result: permissions
+    // and browser state can change while the page is open.
+    const support = checkWebrtcSupport();
+    if (!support.ok) {
+      setError(support.hint ? `${support.message} ${support.hint}` : support.message);
+      setState('error');
+      return;
+    }
 
     try {
       const { default: Vapi } = await import('@vapi-ai/web');
@@ -100,13 +117,9 @@ export default function CallWidget({
       await vapi.start(assistantId!);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      // Microphone permission is far and away the most common failure.
-      // Say so plainly rather than surfacing a raw DOMException.
-      setError(
-        /permission|denied|notallowed/i.test(message)
-          ? 'RelayPay needs microphone access to take the call. Allow it in your browser, then try again.'
-          : message
-      );
+      // Turn DOMExceptions and Daily's opaque "WebRTC not supported or
+      // suppressed" into something the caller can actually act on.
+      setError(explainCallError(message));
       setState('error');
     }
   }, [publicKey, assistantId]);
@@ -160,6 +173,15 @@ export default function CallWidget({
         </div>
       )}
 
+      {preflight && !preflight.ok && (
+        <div className="notice notice-warn mb3">
+          <div>
+            {preflight.message}
+            {preflight.hint && <div className="sm mt1">{preflight.hint}</div>}
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="notice notice-err mb3" role="alert">
           <div>
@@ -173,7 +195,11 @@ export default function CallWidget({
 
       <div className="row row-wrap">
         {!live ? (
-          <button className="btn btn-primary btn-lg" onClick={start} disabled={!configured}>
+          <button
+            className="btn btn-primary btn-lg"
+            onClick={start}
+            disabled={!configured || preflight?.ok === false}
+          >
             {state === 'ended' ? 'Start another call' : 'Start call'}
           </button>
         ) : (
