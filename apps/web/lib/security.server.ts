@@ -40,37 +40,46 @@ export function verifyVapiRequest(headers: Headers, rawBody?: string): string | 
     return 'server misconfigured: VAPI_SERVER_SECRET is not set';
   }
 
-  const provided =
-    headers.get('x-vapi-secret') ??
-    headers.get('x-vapi-signature') ??
-    headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
-    null;
+  // Try EVERY candidate header, not just the first one present.
+  //
+  // Vapi sends `x-vapi-secret` even when the Server URL Secret field is
+  // blank, so the header arrives with an empty value. A `??` chain
+  // treats '' as a hit (it is not nullish), locks onto it, and never
+  // looks at the `authorization` header sitting next to it — which
+  // reported "missing secret header" while naming x-vapi-secret as
+  // present. Collect the non-empty ones and test each.
+  const offered = [
+    headers.get('x-vapi-secret'),
+    headers.get('x-vapi-signature'),
+    headers.get('authorization')?.replace(/^Bearer\s+/i, '')
+  ]
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter((v) => v.length > 0);
 
-  if (!provided) {
-    // Name the headers that arrived, never their values. Without this a
-    // rejection says only "missing secret header", which cannot
-    // distinguish "Vapi was never given a secret" from "Vapi sent it
-    // under a name we do not read".
-    const candidates = [...headers.keys()].filter((k) => k.startsWith('x-vapi') || k === 'authorization');
-    return `missing secret header (auth headers seen: ${candidates.length ? candidates.join(', ') : 'none'})`;
+  if (offered.length === 0) {
+    // Name what arrived, never values. "none" means Vapi was given no
+    // secret; a name here means it sent the header but left it empty.
+    const present = [...headers.keys()].filter((k) => k.startsWith('x-vapi') || k === 'authorization');
+    return present.length
+      ? `secret header present but empty (${present.join(', ')}) — set the secret in Vapi`
+      : 'missing secret header (no auth headers at all)';
   }
 
-  if (safeEqual(provided, expected)) return null;
-
-  // Also accept an HMAC-SHA256 of the raw body, for the signature style.
-  if (rawBody) {
-    const computed = createHmac('sha256', expected).update(rawBody).digest('hex');
-    if (safeEqual(provided, computed)) return null;
+  const expectedHmac = rawBody ? createHmac('sha256', expected).update(rawBody).digest('hex') : null;
+  for (const candidate of offered) {
+    if (safeEqual(candidate, expected)) return null;
+    // Also accept an HMAC-SHA256 of the raw body, for the signature style.
+    if (expectedHmac && safeEqual(candidate, expectedHmac)) return null;
   }
 
-  // Say which header carried it, so a mismatch points at the field to
-  // fix: the model's API key, or the Server URL secret.
-  const via = headers.get('x-vapi-secret')
-    ? 'x-vapi-secret'
-    : headers.get('x-vapi-signature')
-      ? 'x-vapi-signature'
-      : 'authorization';
-  return `secret mismatch (sent via ${via})`;
+  // Say which headers carried a value, so a mismatch points at the field
+  // to fix: the model's API key, or the Server URL secret.
+  const via = [
+    headers.get('x-vapi-secret')?.trim() ? 'x-vapi-secret' : null,
+    headers.get('x-vapi-signature')?.trim() ? 'x-vapi-signature' : null,
+    headers.get('authorization')?.trim() ? 'authorization' : null
+  ].filter(Boolean);
+  return `secret mismatch (values sent via ${via.join(', ')})`;
 }
 
 /** Gate for the internal review dashboard and its API routes. */

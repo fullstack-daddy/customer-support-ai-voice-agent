@@ -16,7 +16,8 @@
     "check:secrets": "node scripts/check-secrets.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:packages": "npm run build --workspace=@relaypay/shared && npm run build --workspace=@relaypay/mcp-server && npm run build --workspace=@relaypay/agent",
-    "start": "npm run start --workspace=@relaypay/web"
+    "start": "npm run start --workspace=@relaypay/web",
+    "test": "node scripts/with-env.mjs tsx packages/shared/src/redact-transcript.test.ts && node scripts/with-env.mjs tsx supabase/seed/chunk-kb.test.ts && node scripts/with-env.mjs tsx apps/web/lib/security.server.test.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.2",
