@@ -1,87 +1,70 @@
 # Deploying
 
-## Short answer on Vercel
+## Where this can run
 
-Yes — with one real caveat you should decide on before you commit to it.
+The Claude Agent SDK spawns a Claude Code subprocess. That one fact decides the host.
 
-The Claude Agent SDK **spawns the MCP server as a child process**. That works on Vercel's Node.js serverless runtime, but not on Edge, and the subprocess is re-spawned on every cold start. For a demo that is fine. For a production voice line it adds latency to the first turn of a cold call, which is exactly the turn a caller notices.
-
-| | Vercel | Persistent Node host (Render / Railway / Fly) |
+| | **Render / Railway / Fly** | **Vercel** |
 | --- | --- | --- |
-| Setup | Connect the repo, done | Dockerfile or buildpack |
-| MCP subprocess | Re-spawned per cold start | Spawned once, reused |
-| First-turn latency on a cold call | +2–5s | None |
-| Cost at low volume | Free tier is enough | ~$5–7/month |
-| Good for | Submission, demos, review | A real support line |
+| Agent subprocess | Works | **Does not work** |
+| Size limit | None that matters | 250MB unzipped per function |
+| Subprocess lifetime | Survives between requests | Re-spawned on every cold start |
+| Good for | The whole app | Nothing here |
 
-**Recommendation:** Vercel for the submission. If this ever takes real calls, move the backend to a persistent host.
+**Vercel cannot host this app.** It is worth stating plainly because the build succeeds and the failure only shows up as the agent saying "I'm having trouble processing that right now" on every turn:
+
+- The SDK's per-platform native CLI is about **238MB**. A Vercel function is capped at 250MB unzipped, and Next plus the rest of `node_modules` does not fit in what is left. The function deploys, then every turn fails with `Native CLI binary for linux-x64 not found`.
+- The SDK also ships a smaller `cli.js` that does fit, and pointing `pathToClaudeCodeExecutable` at it was tried. The agent starts, but **MCP tools never attach**: it loops on `ToolSearch` and never finds `lookup_transaction`, so it cannot answer anything factual. Reproduced on consecutive runs.
+
+There is no configuration that resolves both, so the app is deployed to a persistent Node host.
 
 ---
 
-## Vercel setup
+## Render
 
-### 1. Project settings
+`render.yaml` in the repo is a Blueprint. In Render: **New → Blueprint**, point it at the repo, and it reads that file.
 
-Import the repo, then in **Settings → General**:
+| Setting | Value | Why |
+| --- | --- | --- |
+| Runtime | Node | |
+| Build Command | `npm install && npm run build` | builds the workspace packages, then Next |
+| Start Command | `npm start` | `next start`, which honours Render's `PORT` |
+| Health Check Path | `/api/vapi` | returns a small JSON payload |
+| `NODE_VERSION` | `22` | Node 22 has a native WebSocket, which `supabase-js` requires |
 
-| Setting | Value |
-| --- | --- |
-| Framework Preset | Next.js |
-| Root Directory | `apps/web` |
-| Build Command | leave default |
-| Output Directory | **leave BLANK** |
-| Install Command | leave default |
-| Node.js Version | 20.x or later |
+### Plan
 
-**Leave Output Directory blank.** Vercel resolves it relative to the Root Directory, so `apps/web/.next` with a root of `apps/web` becomes `apps/web/apps/web/.next` and the deploy fails *after* a successful build with:
+The **free** plan spins the service down after about 15 minutes idle, and the next request pays a cold start *plus* the agent subprocess spawn. On a voice call that is the caller waiting through silence. **Starter** keeps it running, which also means the warm-session work survives between calls rather than only within one.
 
-> The Next.js output directory "apps/web/.next" was not found
+### Environment variables
 
-The Next.js preset already knows where the build lands. If that field has a value in your project, clear it — a dashboard setting overrides `vercel.json`.
-
-This is an npm-workspaces monorepo: the web app imports `@relaypay/shared`, `@relaypay/agent` and `@relaypay/mcp-server`, and those packages have to be **compiled** before Next can resolve them — their `exports` point at `dist/`, which does not exist in a fresh clone.
-
-Vercel only runs the build script of the app it detects, so with Root Directory set to `apps/web` it ran `next build` alone and failed with `Module not found: Can't resolve '@relaypay/shared'`. The web package now has a `prebuild` hook that compiles the workspace packages first, so either Root Directory setting works.
-
-`vercel.json` keeps only the framework and the install/build commands. Function limits are declared in the routes themselves (`export const maxDuration`), because a `functions` block in `vercel.json` is matched against paths relative to the Root Directory — with a root of `apps/web` the repo-relative globs silently matched nothing, leaving the agent on the 10-second default it cannot finish in.
-
-### 2. Environment variables
-
-**Settings → Environment Variables.** Add every one of these to **Production** (and Preview, if you want preview deploys to work):
+Set these in the Render dashboard (the Blueprint declares them `sync: false`, so Render prompts rather than storing them in git):
 
 | Variable | Notes |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | |
 | `SUPABASE_URL` | Bare project URL, no `/rest/v1` |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Server-only.** Never prefix with `NEXT_PUBLIC_`. |
-| `SUPABASE_ANON_KEY` | Optional; currently unused |
 | `AUTH_SECRET` | 32+ random chars. Changing it logs everyone out. |
-| `ADMIN_EMAIL` | |
-| `ADMIN_PASSWORD` | |
-| `ADMIN_NAME` | Optional |
-| `VAPI_SERVER_SECRET` | Must match the Vapi assistant's Server URL secret |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | There is no sign-up; this is the only account |
+| `VAPI_SERVER_SECRET` | Must match the Vapi assistant's secret |
 | `NEXT_PUBLIC_VAPI_PUBLIC_KEY` | Publishable; safe in the browser |
 | `NEXT_PUBLIC_VAPI_ASSISTANT_ID` | Publishable |
-| `RESEND_API_KEY` | |
-| `EMAIL_FROM` | Must be on a **verified** Resend domain |
-| `EMAIL_REPLY_TO` | Optional |
+| `RESEND_API_KEY`, `EMAIL_FROM` | `EMAIL_FROM` must be on a **verified** Resend domain |
+| `ALLOWED_ORIGINS`, `APP_BASE_URL` | Your Render URL |
 | `VOYAGE_API_KEY` *or* `OPENAI_API_KEY` | Optional; without either, retrieval uses Postgres full-text |
-| `ALLOWED_ORIGINS` | Your deployed URL, e.g. `https://yourapp.vercel.app` |
-| `APP_BASE_URL` | Same |
+| `CLAUDE_MODEL` | Optional; defaults to `claude-sonnet-4-5` |
+| `AGENT_TURN_TIMEOUT_MS` | Optional; defaults to 90s |
 
-**`NEXT_PUBLIC_*` variables are baked in at build time.** Adding one after a deploy does nothing until you redeploy. If the call page says "Voice isn't configured" on a deployment where the variable is clearly set, this is almost always why — redeploy.
+**`NEXT_PUBLIC_*` variables are baked in at build time.** Adding one after a deploy does nothing until you redeploy. If the call page says "Voice isn't configured" where the variable is clearly set, this is why.
 
-### 3. Point Vapi at the deployment
+### Point Vapi at it
 
-In the Vapi assistant:
+See [vapi-configuration.md](./vapi-configuration.md). In short:
 
-- **Model → custom-llm URL:** `https://<your-app>.vercel.app/api/vapi` (not the full `/chat/completions` path — see [vapi-configuration.md](./vapi-configuration.md))
-- **Server URL:** `https://<your-app>.vercel.app/api/vapi/end-of-call`
-- **Server URL Secret:** the same string as `VAPI_SERVER_SECRET`
-
-### 4. Build the workspace packages
-
-The root `npm run build` already builds `shared` → `mcp-server` → `agent` → `web` in order. The agent resolves the MCP entrypoint relative to `process.cwd()`, which on Vercel is the repo root, so `packages/mcp-server/dist/index.js` resolves correctly. If you ever see "MCP server not found" in the logs, set `RELAYPAY_MCP_ENTRYPOINT` to the absolute path.
+- **Model → Custom LLM URL:** `https://<your-service>.onrender.com/api/vapi`
+- **Server URL:** `https://<your-service>.onrender.com/api/vapi/end-of-call`
+- Both secrets equal to `VAPI_SERVER_SECRET`
 
 ---
 
@@ -89,11 +72,7 @@ The root `npm run build` already builds `shared` → `mcp-server` → `agent` �
 
 Everything reads **one `.env` at the repo root**.
 
-Next normally only auto-loads `.env` from its own directory (`apps/web`), which silently ignores a root `.env` in a monorepo. Every env-dependent npm script therefore runs through `scripts/with-env.mjs`, which loads the root `.env` into the environment *before* Next starts.
-
-That ordering matters. Loading the file from `next.config.mjs` is not enough: Next restores its own snapshot of `process.env` after reading the config, so server-side values set there never reach a route handler — the admin login fails with `not_configured` while the value sits in the file — and edge middleware, which cannot read files at all, never sees them either. Only a variable that is already in the environment when Next boots reaches all three runtimes (node handlers, edge middleware, and `NEXT_PUBLIC_*` in the client bundle).
-
-So: keep your `.env` at the top level, not inside `apps/web`, and start the app with `npm run dev` rather than calling `next` directly. Real environment variables always win over the file, which is why nothing changes on Vercel.
+Next only auto-loads `.env` from its own directory (`apps/web`), so every env-dependent npm script runs through `scripts/with-env.mjs`, which loads the root file into the environment *before* Next starts. That ordering matters: loading it from `next.config.mjs` is too late, because Next restores its own snapshot of `process.env` afterwards and edge middleware cannot read files at all.
 
 ```bash
 npm install
@@ -104,13 +83,13 @@ npm run dev
 
 ### Exposing localhost to Vapi
 
-Vapi needs a public URL to call:
+Vapi calls your server from its cloud, so `localhost` is unreachable:
 
 ```bash
 npx ngrok http 3000
 ```
 
-Then point the assistant's custom-llm URL at the ngrok address. It changes every restart on the free tier.
+Point the assistant's Custom LLM URL at `https://<id>.ngrok.app/api/vapi`. The free tier changes the subdomain on every restart.
 
 ---
 
@@ -118,12 +97,12 @@ Then point the assistant's custom-llm URL at the ngrok address. It changes every
 
 | Symptom | Cause |
 | --- | --- |
-| "Voice isn't configured" despite the env being set | `NEXT_PUBLIC_*` is build-time. Redeploy (Vercel) or restart the dev server (local). Locally, also check the `.env` is at the **repo root**. |
-| Build succeeds but deploy fails on a missing output directory | Output Directory is set. Clear it — Vercel appends it to the Root Directory. |
-| Build fails on `@relaypay/shared` not found | The workspace packages were not compiled. `apps/web`'s `prebuild` hook does this; if you changed the build command, make sure it still runs `npm run build:packages`. |
-| Agent replies but calls no tools | Workspace packages not built. `npm run build`. |
-| "WebRTC not supported or suppressed" when starting a call | The page is open on a plain-http address that is not loopback, e.g. `http://192.168.x.x:3000`. Browsers only expose the microphone in a secure context. Use `http://localhost:3000`, or serve over https. The app now detects this up front and says so instead of failing on click. |
+| Every turn says "I'm having trouble processing that right now" | The agent ran but failed. The response carries `x-relaypay-degraded` with the reason — read it with curl, it is only visible to a caller holding `VAPI_SERVER_SECRET`. |
+| `Native CLI binary for linux-x64 not found` | You are on Vercel, or a host that omitted optional dependencies. See the top of this page. |
+| Agent replies but calls no tools, looping on `ToolSearch` | MCP never attached. Check `packages/mcp-server/dist` exists (`npm run build`). |
+| "Voice isn't configured" despite the env being set | `NEXT_PUBLIC_*` is build-time. Redeploy. Locally, check the `.env` is at the **repo root**. |
+| Build fails on `@relaypay/shared` not found | The workspace packages were not compiled. `apps/web`'s `prebuild` hook does this. |
 | Vapi gets 401 | `VAPI_SERVER_SECRET` differs between the deployment and the assistant settings. |
 | Emails fail with a domain error | `EMAIL_FROM` is not on a domain verified in Resend. |
-| Admin login returns 500 `not_configured` | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `AUTH_SECRET` not in the environment. Auth fails closed by design. Locally, check they are in the **root** `.env` and that you started with `npm run dev` (which runs `scripts/with-env.mjs`). |
-| First turn of a call is slow, later turns fine | Cold start spawning the MCP subprocess. Expected on serverless; move to a persistent host if it matters. |
+| Admin login returns 500 `not_configured` | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `AUTH_SECRET` not set. Auth fails closed by design. |
+| First turn of a call is slow, later turns fine | The agent subprocess spawning. Expected; a paid plan that never idles reduces it. |

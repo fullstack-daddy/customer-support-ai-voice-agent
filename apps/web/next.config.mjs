@@ -51,25 +51,17 @@ const nextConfig = {
   outputFileTracingRoot: ROOT,
   // Files the agent reaches at RUNTIME, which static tracing cannot see.
   //
-  // The agent spawns the MCP server by building its path at run time, so
-  // nothing imports packages/mcp-server/dist and Next leaves it out of
-  // the serverless bundle. The spawn then fails instantly — a turn that
-  // dies in ~3s rather than timing out — and the caller hears the
-  // generic "I'm having trouble" line. The Agent SDK is listed for the
-  // same reason: it unpacks its CLI from files it reads at run time.
+  // The agent builds the MCP server's path at run time, so nothing
+  // imports packages/mcp-server/dist and Next would leave it out of a
+  // traced build. Only matters for bundled output (standalone/Docker);
+  // a plain `next start` has the whole repo on disk.
+  //
+  // The Agent SDK is deliberately NOT listed: its CLI is a ~238MB
+  // per-platform native package, which is why this app cannot run in a
+  // serverless function at all. See docs/deploying.md.
   outputFileTracingIncludes: {
-    '/api/vapi': [
-      '../../packages/mcp-server/dist/**',
-      '../../packages/shared/dist/**',
-      '../../packages/agent/node_modules/@anthropic-ai/claude-agent-sdk/**',
-      '../../node_modules/@anthropic-ai/claude-agent-sdk/**'
-    ],
-    '/api/vapi/chat/completions': [
-      '../../packages/mcp-server/dist/**',
-      '../../packages/shared/dist/**',
-      '../../packages/agent/node_modules/@anthropic-ai/claude-agent-sdk/**',
-      '../../node_modules/@anthropic-ai/claude-agent-sdk/**'
-    ]
+    '/api/vapi': ['../../packages/mcp-server/dist/**', '../../packages/shared/dist/**'],
+    '/api/vapi/chat/completions': ['../../packages/mcp-server/dist/**', '../../packages/shared/dist/**']
   },
   async headers() {
     return [

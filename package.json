@@ -15,7 +15,8 @@
     "mcp:smoke": "node scripts/with-env.mjs tsx packages/mcp-server/scripts/smoke-test.ts",
     "check:secrets": "node scripts/check-secrets.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build:packages": "npm run build --workspace=@relaypay/shared && npm run build --workspace=@relaypay/mcp-server && npm run build --workspace=@relaypay/agent"
+    "build:packages": "npm run build --workspace=@relaypay/shared && npm run build --workspace=@relaypay/mcp-server && npm run build --workspace=@relaypay/agent",
+    "start": "npm run start --workspace=@relaypay/web"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

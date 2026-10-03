@@ -157,27 +157,20 @@ interface Accumulator {
  * kill the subprocess the next turn depends on.
  */
 /**
- * Absolute path to the SDK's bundled JavaScript CLI.
+ * Which Claude Code executable the SDK should run.
  *
- * The SDK can run either a per-platform native binary or the cli.js it
- * ships. The native package is ~238MB, which does not fit inside a
- * Vercel serverless function (250MB unzipped, before Next and
- * everything else), and when it is absent the SDK does not fall back —
- * it fails with "Native CLI binary for linux-x64 not found" and the
- * caller hears the generic trouble line.
+ * Normally none: the SDK picks its per-platform native binary, which is
+ * the only configuration where MCP tools actually attach. Forcing the
+ * bundled cli.js instead was tried to fit Vercel's 250MB function limit
+ * (the native package is ~238MB) and does NOT work — the agent starts,
+ * but the MCP server never registers and it loops on ToolSearch without
+ * ever finding lookup_transaction. See docs/deploying.md.
  *
- * Pointing at cli.js makes the choice explicit and identical on every
- * platform, and keeps the deployed bundle to the ~50MB main package.
+ * CLAUDE_CODE_EXECUTABLE stays as an escape hatch for hosts that ship
+ * their own build.
  */
 function claudeCodeExecutable(): string | undefined {
-  if (process.env.CLAUDE_CODE_EXECUTABLE) return process.env.CLAUDE_CODE_EXECUTABLE;
-  try {
-    const require_ = createRequire(import.meta.url);
-    return require_.resolve('@anthropic-ai/claude-agent-sdk/cli.js');
-  } catch {
-    // Older or repackaged SDKs may not expose it; let the SDK decide.
-    return undefined;
-  }
+  return process.env.CLAUDE_CODE_EXECUTABLE || undefined;
 }
 
 function agentOptions(systemPrompt: string, maxTurns: number): Record<string, unknown> {

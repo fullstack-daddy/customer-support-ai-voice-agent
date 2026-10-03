@@ -1,0 +1,56 @@
+# Render deployment for the RelayPay support agent.
+#
+# Why not Vercel: the Claude Agent SDK runs a per-platform native CLI of
+# roughly 238MB. A Vercel serverless function is capped at 250MB
+# unzipped, so it cannot hold that plus Next and the rest of
+# node_modules. The SDK's smaller bundled cli.js does fit, but MCP tools
+# never attach to it — the agent loops on ToolSearch and never finds
+# lookup_transaction. See docs/deploying.md.
+#
+# A persistent host has no such cap, and it keeps the agent subprocess
+# alive BETWEEN requests, so the warm-session work pays off across a
+# whole deployment rather than only within one call.
+
+services:
+  - type: web
+    name: relaypay-support-agent
+    runtime: node
+    plan: starter          # free spins down when idle; see the note below
+    region: oregon
+    healthCheckPath: /api/vapi
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      # Node 22 has a native WebSocket, which supabase-js needs.
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+
+      # Secrets: set these in the Render dashboard, not here.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: VAPI_SERVER_SECRET
+        sync: false
+      - key: NEXT_PUBLIC_VAPI_PUBLIC_KEY
+        sync: false
+      - key: NEXT_PUBLIC_VAPI_ASSISTANT_ID
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
