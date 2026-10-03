@@ -90,20 +90,30 @@ function completion(text: string, model: string, conversationId: string) {
 }
 
 /**
- * OpenAI-compatible SSE stream.
+ * OpenAI-compatible SSE stream that opens BEFORE the answer exists.
  *
- * Vapi's custom-LLM client expects Server-Sent Events: a sequence of
- * `data: {chunk}` lines terminated by `data: [DONE]`. Returning a plain
- * JSON body when it asked for a stream leaves the assistant silent for
- * the whole turn, which is indistinguishable from the backend being
- * down — exactly the failure that is hardest to diagnose from a call.
+ * Vapi's custom-LLM timeout is documented as "the timeout for the
+ * connection to the custom provider without needing to stream any
+ * tokens back", default 20 seconds. An agent turn takes longer than
+ * that — measured at 24.9s on the deployed service — so buffering the
+ * whole reply and sending it at the end meant Vapi saw nothing for 25
+ * seconds, gave up, and ejected the caller from the room. The caller
+ * experienced that as the call simply dropping.
+ *
+ * So the response opens immediately with the role frame every OpenAI
+ * stream starts with, which carries no spoken content, and the answer
+ * follows when the agent has it. Comment lines (": ...") are ignored by
+ * SSE parsers and keep intermediaries from closing an idle connection.
  *
  * The agent produces its answer in one piece, so there is no token
  * stream to forward. Emitting it sentence by sentence still helps: Vapi
- * hands each chunk to text-to-speech as it arrives, so the caller hears
- * the first sentence while the rest is still being written.
+ * hands each chunk to text-to-speech as it arrives.
  */
-function sseCompletion(text: string, model: string, conversationId: string): Response {
+function streamTurn(
+  run: () => Promise<{ text: string; degraded?: string }>,
+  model: string,
+  conversationId: string
+): Response {
   const encoder = new TextEncoder();
   const id = `chatcmpl-${conversationId}`;
   const created = Math.floor(Date.now() / 1000);
@@ -117,17 +127,48 @@ function sseCompletion(text: string, model: string, conversationId: string): Res
       choices: [{ index: 0, delta, finish_reason: finish }]
     })}\n\n`;
 
-  // Keep the punctuation with its sentence so TTS prosody survives.
-  const sentences = text.match(/[^.!?]+[.!?]+[\s]*|[^.!?]+$/g) ?? [text];
-
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode(frame({ role: 'assistant', content: '' }, null)));
-      for (const sentence of sentences) {
-        if (sentence) controller.enqueue(encoder.encode(frame({ content: sentence }, null)));
+    async start(controller) {
+      const send = (s: string) => controller.enqueue(encoder.encode(s));
+
+      // Opens the stream. Empty content, so nothing is spoken.
+      send(frame({ role: 'assistant', content: '' }, null));
+
+      const heartbeat = setInterval(() => {
+        try {
+          send(': keep-alive\n\n');
+        } catch {
+          // Stream already closed; the interval is cleared below.
+        }
+      }, 5000);
+
+      let result: { text: string; degraded?: string };
+      try {
+        result = await run();
+      } catch (e) {
+        result = {
+          text: "I'm sorry, I'm having trouble on my end right now. Let me arrange for a specialist to follow up with you — could I take your name and email address?",
+          degraded: e instanceof Error ? e.message : String(e)
+        };
+      } finally {
+        clearInterval(heartbeat);
       }
-      controller.enqueue(encoder.encode(frame({}, 'stop')));
-      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+
+      // Headers are long gone by now, so the diagnostic rides along as a
+      // comment. SSE parsers drop it; `curl -N` shows it.
+      if (result.degraded) {
+        const oneLine = result.degraded.split(/[\r\n]+/).join(' ').slice(0, 200);
+        send(': degraded ' + oneLine + '\n\n');
+      }
+
+      // Keep the punctuation with its sentence so TTS prosody survives.
+      const sentences = result.text.match(/[^.!?]+[.!?]+[\s]*|[^.!?]+$/g) ?? [result.text];
+      for (const sentence of sentences) {
+        if (sentence) send(frame({ content: sentence }, null));
+      }
+
+      send(frame({}, 'stop'));
+      send('data: [DONE]\n\n');
       controller.close();
     }
   });
@@ -185,9 +226,9 @@ export async function POST(req: Request): Promise<Response> {
   const respond = (text: string, degraded?: string) => {
     const res =
       body.stream === true
-        ? sseCompletion(text, model, conversationId)
+        ? streamTurn(async () => ({ text, degraded }), model, conversationId)
         : json(completion(text, model, conversationId));
-    if (degraded) res.headers.set('x-relaypay-degraded', degraded.slice(0, 200));
+    if (degraded && body.stream !== true) res.headers.set('x-relaypay-degraded', degraded.slice(0, 200));
     return res;
   };
 
@@ -227,30 +268,39 @@ export async function POST(req: Request): Promise<Response> {
     content: redactTranscript(flattenContent(m.content)).text
   })).filter((m) => m.content);
 
-  try {
-    const result = await runAgentTurn({
-      conversationId,
-      userMessage,
-      history,
-      channel: body.call?.type === 'inboundPhoneCall' ? 'phone' : 'web_voice'
-    });
+  // Never hang or 500 back to Vapi — a 500 makes the assistant go silent
+  // mid-call, which is the worst possible caller experience. Speak a
+  // graceful fallback instead.
+  const runTurn = async (): Promise<{ text: string; degraded?: string }> => {
+    try {
+      const result = await runAgentTurn({
+        conversationId,
+        userMessage,
+        history,
+        channel: body.call?.type === 'inboundPhoneCall' ? 'phone' : 'web_voice'
+      });
 
-    if (result.degraded) {
-      // Surface degradation in logs; the caller still gets a usable reply.
-      console.warn(`[vapi] degraded turn on ${conversationId}: ${result.degraded}`);
+      if (result.degraded) {
+        // Surface degradation in logs; the caller still gets a usable reply.
+        console.warn(`[vapi] degraded turn on ${conversationId}: ${result.degraded}`);
+      }
+      return { text: result.text, degraded: result.degraded };
+    } catch (e) {
+      console.error(`[vapi] turn threw on ${conversationId}: ${e instanceof Error ? e.message : e}`);
+      return {
+        text: "I'm sorry, I'm having trouble on my end right now. Let me arrange for a specialist to follow up with you — could I take your name and email address?",
+        degraded: e instanceof Error ? e.message : String(e)
+      };
     }
+  };
 
-    return respond(result.text, result.degraded);
-  } catch (e) {
-    // Never hang or 500 back to Vapi — a 500 makes the assistant go
-    // silent mid-call, which is the worst possible caller experience.
-    // Speak a graceful fallback instead.
-    console.error(`[vapi] turn threw on ${conversationId}: ${e instanceof Error ? e.message : e}`);
-    return respond(
-      "I'm sorry, I'm having trouble on my end right now. Let me arrange for a specialist to follow up with you — could I take your name and email address?",
-      e instanceof Error ? e.message : String(e)
-    );
-  }
+  // Streaming opens the response NOW and fills it when the agent is
+  // done, so Vapi's connection timeout stops applying. Non-streaming
+  // callers (curl, the eval runner) still get one JSON body.
+  if (body.stream === true) return streamTurn(runTurn, model, conversationId);
+
+  const result = await runTurn();
+  return respond(result.text, result.degraded);
 }
 
 /** Vapi occasionally probes the URL. Answer without leaking anything. */

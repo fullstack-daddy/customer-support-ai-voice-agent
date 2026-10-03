@@ -42,6 +42,22 @@ Read that preview line before saving; it is the fastest way to catch this. The r
 
 The system prompt genuinely does not matter here. The route drops Vapi's system message on purpose and uses the agent's own, which carries the security rules. Changing the dashboard prompt will not change the agent's behaviour — edit `packages/agent/src/system-prompt.ts` instead.
 
+### If calls drop with "ejected"
+
+Vapi ends the room when the model does not answer in time. Its custom-LLM
+`timeoutSeconds` is documented as the timeout "without needing to stream any
+tokens back" and defaults to **20 seconds** — shorter than an agent turn, which
+measured 24.9s on the deployed service.
+
+This route opens its SSE response immediately (first byte in under 0.1s) and
+fills it when the agent is done, so the timeout stops applying and no
+configuration change is needed. If you still see drops, raise
+`model.timeoutSeconds` on the assistant — the API accepts up to 300:
+
+```bash
+curl -X PATCH https://api.vapi.ai/assistant/<assistant-id>   -H "Authorization: Bearer <your-private-key>"   -H "Content-Type: application/json"   -d '{"model":{"provider":"custom-llm","url":"https://<host>/api/vapi","timeoutSeconds":120}}'
+```
+
 ## 2. Server URL (end-of-call)
 
 **Assistant → Advanced → Server URL**
