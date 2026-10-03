@@ -173,7 +173,7 @@ function claudeCodeExecutable(): string | undefined {
   return process.env.CLAUDE_CODE_EXECUTABLE || undefined;
 }
 
-function agentOptions(systemPrompt: string, maxTurns: number): Record<string, unknown> {
+function agentOptions(systemPrompt: string, maxTurns: number, conversationId: string): Record<string, unknown> {
   const executable = claudeCodeExecutable();
   return {
     // Plain string = full custom system prompt, no Claude Code preset.
@@ -200,6 +200,10 @@ function agentOptions(systemPrompt: string, maxTurns: number): Record<string, un
         command: process.execPath,      // the running node binary
         args: [mcpEntrypoint()],
         env: {
+          // Authoritative conversation id. The MCP server prefers this
+          // over anything the model puts in the tool arguments, so a
+          // ticket cannot be filed against an invented conversation.
+          RELAYPAY_CONVERSATION_ID: conversationId,
           SUPABASE_URL: process.env.SUPABASE_URL ?? '',
           SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
           ...(process.env.VOYAGE_API_KEY ? { VOYAGE_API_KEY: process.env.VOYAGE_API_KEY } : {}),
@@ -379,7 +383,7 @@ ${seed}` : seed);
       // Cold path: one subprocess for this turn only. Correct, just slow.
       const stream = query({
         prompt: buildPrompt(input),
-        options: { ...agentOptions(systemPrompt, MAX_AGENT_TURNS_PER_REQUEST), abortController: controller }
+        options: { ...agentOptions(systemPrompt, MAX_AGENT_TURNS_PER_REQUEST, conversationId), abortController: controller }
       });
       for await (const message of stream) {
         if (collect(message, acc)) break;

@@ -124,7 +124,10 @@ export function warmSession(conversationId: string, systemPrompt: string, maxTur
   const input = new InputQueue();
   let stream: AsyncGenerator<SDKMessage, void>;
   try {
-    stream = query({ prompt: input, options: buildOptions(systemPrompt, maxTurns) }) as AsyncGenerator<SDKMessage, void>;
+    stream = query({
+      prompt: input,
+      options: buildOptions(systemPrompt, maxTurns, conversationId)
+    }) as AsyncGenerator<SDKMessage, void>;
   } catch (e) {
     console.error(`[agent] could not warm ${conversationId}: ${e instanceof Error ? e.message : e}`);
     return null;
@@ -165,14 +168,18 @@ export function sessionCount(): number {
 }
 
 /** Shared option set, so a warm session behaves exactly like a cold turn. */
-let optionsBuilder: ((systemPrompt: string, maxTurns: number) => Record<string, unknown>) | null = null;
+let optionsBuilder:
+  | ((systemPrompt: string, maxTurns: number, conversationId: string) => Record<string, unknown>)
+  | null = null;
 
 /** runtime.ts owns the option set; it registers it here to avoid a cycle. */
-export function registerOptionsBuilder(fn: (systemPrompt: string, maxTurns: number) => Record<string, unknown>): void {
+export function registerOptionsBuilder(
+  fn: (systemPrompt: string, maxTurns: number, conversationId: string) => Record<string, unknown>
+): void {
   optionsBuilder = fn;
 }
 
-function buildOptions(systemPrompt: string, maxTurns: number): never {
+function buildOptions(systemPrompt: string, maxTurns: number, conversationId: string): never {
   if (!optionsBuilder) throw new Error('agent session options builder was never registered');
-  return optionsBuilder(systemPrompt, maxTurns) as never;
+  return optionsBuilder(systemPrompt, maxTurns, conversationId) as never;
 }

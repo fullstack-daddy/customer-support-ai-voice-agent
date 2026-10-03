@@ -48,12 +48,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
-  // conversation_id travels in the tool arguments; the agent layer puts
-  // it there. Tools that need it for foreign keys validate it themselves.
-  const conversationId =
+  // The conversation id is NOT taken from the model.
+  //
+  // It used to be read straight out of the tool arguments, which meant
+  // the model chose it. In an acceptance run the agent invented
+  // "voice_session_dayo_ade_20261003" and the ticket it raised was filed
+  // under that instead of the live call, so the audit trail and the
+  // admin console lost the link between a call and what it produced.
+  //
+  // This process is spawned per conversation, so the authoritative id
+  // comes from the environment. The argument is only a fallback for
+  // direct invocations (smoke tests, the eval runner).
+  const fromEnv = process.env.RELAYPAY_CONVERSATION_ID;
+  const fromArgs =
     typeof (args as Record<string, unknown> | undefined)?.conversation_id === 'string'
       ? ((args as Record<string, string>).conversation_id ?? null)
       : null;
+
+  if (fromEnv && fromArgs && fromArgs !== fromEnv) {
+    // Worth seeing: it means the model is still inventing one.
+    console.error(`[mcp] ignoring model-supplied conversation_id ${fromArgs}; using ${fromEnv}`);
+  }
+  const conversationId = fromEnv || fromArgs;
   const ctx: ToolContext = { conversationId };
 
   // Handlers are already total — they catch internally and return
