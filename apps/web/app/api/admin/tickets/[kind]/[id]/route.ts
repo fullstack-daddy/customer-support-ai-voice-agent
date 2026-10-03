@@ -11,6 +11,9 @@ import { json } from '@/lib/security.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Approving a ticket sends mail through Resend; the default 10s
+// function limit is not enough for a provider round trip.
+export const maxDuration = 30;
 
 type Kind = 'ticket' | 'escalation';
 const TABLE: Record<Kind, string> = { ticket: 'support_tickets', escalation: 'escalations' };

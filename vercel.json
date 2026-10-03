@@ -1,16 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build",
-  "installCommand": "npm install",
-  "outputDirectory": "apps/web/.next",
   "framework": "nextjs",
-  "functions": {
-    "apps/web/app/api/vapi/chat/completions/route.ts": {
-      "maxDuration": 60,
-      "memory": 1024
-    },
-    "apps/web/app/api/admin/tickets/[kind]/[id]/route.ts": {
-      "maxDuration": 30
-    }
-  }
+  "buildCommand": "npm run build",
+  "installCommand": "npm install"
 }

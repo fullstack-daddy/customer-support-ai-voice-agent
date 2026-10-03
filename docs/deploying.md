@@ -27,17 +27,23 @@ Import the repo, then in **Settings → General**:
 | Setting | Value |
 | --- | --- |
 | Framework Preset | Next.js |
-| Root Directory | repo root **or** `apps/web` — both work |
-| Build Command | `npm run build` |
-| Output Directory | `apps/web/.next` |
-| Install Command | `npm install` |
+| Root Directory | `apps/web` |
+| Build Command | leave default |
+| Output Directory | **leave BLANK** |
+| Install Command | leave default |
 | Node.js Version | 20.x or later |
+
+**Leave Output Directory blank.** Vercel resolves it relative to the Root Directory, so `apps/web/.next` with a root of `apps/web` becomes `apps/web/apps/web/.next` and the deploy fails *after* a successful build with:
+
+> The Next.js output directory "apps/web/.next" was not found
+
+The Next.js preset already knows where the build lands. If that field has a value in your project, clear it — a dashboard setting overrides `vercel.json`.
 
 This is an npm-workspaces monorepo: the web app imports `@relaypay/shared`, `@relaypay/agent` and `@relaypay/mcp-server`, and those packages have to be **compiled** before Next can resolve them — their `exports` point at `dist/`, which does not exist in a fresh clone.
 
 Vercel only runs the build script of the app it detects, so with Root Directory set to `apps/web` it ran `next build` alone and failed with `Module not found: Can't resolve '@relaypay/shared'`. The web package now has a `prebuild` hook that compiles the workspace packages first, so either Root Directory setting works.
 
-`vercel.json` in the repo already sets the build commands and the 60-second `maxDuration` on the chat-completions route, so most of this is applied for you.
+`vercel.json` keeps only the framework and the install/build commands. Function limits are declared in the routes themselves (`export const maxDuration`), because a `functions` block in `vercel.json` is matched against paths relative to the Root Directory — with a root of `apps/web` the repo-relative globs silently matched nothing, leaving the agent on the 10-second default it cannot finish in.
 
 ### 2. Environment variables
 
@@ -113,6 +119,7 @@ Then point the assistant's custom-llm URL at the ngrok address. It changes every
 | Symptom | Cause |
 | --- | --- |
 | "Voice isn't configured" despite the env being set | `NEXT_PUBLIC_*` is build-time. Redeploy (Vercel) or restart the dev server (local). Locally, also check the `.env` is at the **repo root**. |
+| Build succeeds but deploy fails on a missing output directory | Output Directory is set. Clear it — Vercel appends it to the Root Directory. |
 | Build fails on `@relaypay/shared` not found | The workspace packages were not compiled. `apps/web`'s `prebuild` hook does this; if you changed the build command, make sure it still runs `npm run build:packages`. |
 | Agent replies but calls no tools | Workspace packages not built. `npm run build`. |
 | "WebRTC not supported or suppressed" when starting a call | The page is open on a plain-http address that is not loopback, e.g. `http://192.168.x.x:3000`. Browsers only expose the microphone in a secure context. Use `http://localhost:3000`, or serve over https. The app now detects this up front and says so instead of failing on click. |
