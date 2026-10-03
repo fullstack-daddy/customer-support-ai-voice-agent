@@ -61,11 +61,13 @@ const nextConfig = {
     '/api/vapi': [
       '../../packages/mcp-server/dist/**',
       '../../packages/shared/dist/**',
+      '../../packages/agent/node_modules/@anthropic-ai/claude-agent-sdk/**',
       '../../node_modules/@anthropic-ai/claude-agent-sdk/**'
     ],
     '/api/vapi/chat/completions': [
       '../../packages/mcp-server/dist/**',
       '../../packages/shared/dist/**',
+      '../../packages/agent/node_modules/@anthropic-ai/claude-agent-sdk/**',
       '../../node_modules/@anthropic-ai/claude-agent-sdk/**'
     ]
   },

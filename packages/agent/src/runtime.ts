@@ -20,6 +20,7 @@
 //    Node runtime, not Edge.
 
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
@@ -155,10 +156,36 @@ interface Accumulator {
  * here: aborting is per-turn on the cold path, but on a session it would
  * kill the subprocess the next turn depends on.
  */
+/**
+ * Absolute path to the SDK's bundled JavaScript CLI.
+ *
+ * The SDK can run either a per-platform native binary or the cli.js it
+ * ships. The native package is ~238MB, which does not fit inside a
+ * Vercel serverless function (250MB unzipped, before Next and
+ * everything else), and when it is absent the SDK does not fall back —
+ * it fails with "Native CLI binary for linux-x64 not found" and the
+ * caller hears the generic trouble line.
+ *
+ * Pointing at cli.js makes the choice explicit and identical on every
+ * platform, and keeps the deployed bundle to the ~50MB main package.
+ */
+function claudeCodeExecutable(): string | undefined {
+  if (process.env.CLAUDE_CODE_EXECUTABLE) return process.env.CLAUDE_CODE_EXECUTABLE;
+  try {
+    const require_ = createRequire(import.meta.url);
+    return require_.resolve('@anthropic-ai/claude-agent-sdk/cli.js');
+  } catch {
+    // Older or repackaged SDKs may not expose it; let the SDK decide.
+    return undefined;
+  }
+}
+
 function agentOptions(systemPrompt: string, maxTurns: number): Record<string, unknown> {
+  const executable = claudeCodeExecutable();
   return {
     // Plain string = full custom system prompt, no Claude Code preset.
     systemPrompt,
+    ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
     model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5',
     maxTurns,
     // No human is available to approve a tool call mid-call. Safe
