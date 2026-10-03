@@ -1,6 +1,6 @@
 # RelayPay Support Agent
 
-**Production Customer Support Voice Agent · Week 6** · Emmanuel Aboyeji · aboyeji@stratishield.ai · 2026-10-03
+**Production Customer Support Voice Agent · Week 6** · Emmanuel Aboyeji · 2026-10-03
 
 **Live:** [customer-support-ai-voice-agent.onrender.com](https://customer-support-ai-voice-agent.onrender.com) · **Code:** [github.com/fullstack-daddy/customer-support-ai-voice-agent](https://github.com/fullstack-daddy/customer-support-ai-voice-agent)
 
