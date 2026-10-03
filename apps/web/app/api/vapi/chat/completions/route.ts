@@ -89,6 +89,59 @@ function completion(text: string, model: string, conversationId: string) {
   };
 }
 
+/**
+ * OpenAI-compatible SSE stream.
+ *
+ * Vapi's custom-LLM client expects Server-Sent Events: a sequence of
+ * `data: {chunk}` lines terminated by `data: [DONE]`. Returning a plain
+ * JSON body when it asked for a stream leaves the assistant silent for
+ * the whole turn, which is indistinguishable from the backend being
+ * down — exactly the failure that is hardest to diagnose from a call.
+ *
+ * The agent produces its answer in one piece, so there is no token
+ * stream to forward. Emitting it sentence by sentence still helps: Vapi
+ * hands each chunk to text-to-speech as it arrives, so the caller hears
+ * the first sentence while the rest is still being written.
+ */
+function sseCompletion(text: string, model: string, conversationId: string): Response {
+  const encoder = new TextEncoder();
+  const id = `chatcmpl-${conversationId}`;
+  const created = Math.floor(Date.now() / 1000);
+
+  const frame = (delta: Record<string, unknown>, finish: string | null) =>
+    `data: ${JSON.stringify({
+      id,
+      object: 'chat.completion.chunk',
+      created,
+      model,
+      choices: [{ index: 0, delta, finish_reason: finish }]
+    })}\n\n`;
+
+  // Keep the punctuation with its sentence so TTS prosody survives.
+  const sentences = text.match(/[^.!?]+[.!?]+[\s]*|[^.!?]+$/g) ?? [text];
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(frame({ role: 'assistant', content: '' }, null)));
+      for (const sentence of sentences) {
+        if (sentence) controller.enqueue(encoder.encode(frame({ content: sentence }, null)));
+      }
+      controller.enqueue(encoder.encode(frame({}, 'stop')));
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      // no-transform stops proxies buffering the stream into one lump.
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive'
+    }
+  });
+}
+
 export async function POST(req: Request): Promise<Response> {
   const rawBody = await req.text();
 
@@ -119,6 +172,14 @@ export async function POST(req: Request): Promise<Response> {
   const conversationId = resolveConversationId(body, req.headers);
   const model = body.model ?? 'relaypay-support-agent';
 
+  // Vapi normally asks for a stream. Honour whatever it asked for:
+  // sending a plain JSON body to a client expecting SSE makes the
+  // assistant stay silent for the entire turn.
+  const respond = (text: string) =>
+    body.stream === true
+      ? sseCompletion(text, model, conversationId)
+      : json(completion(text, model, conversationId));
+
   // The last user message is the turn to answer. Anything before it is
   // context. Vapi's own system message is dropped — our system prompt
   // comes from the agent package, not from the voice layer.
@@ -128,12 +189,8 @@ export async function POST(req: Request): Promise<Response> {
   if (lastUserIdx === -1) {
     // No user turn yet (Vapi sometimes probes on connect). Return the
     // greeting rather than running the agent for nothing.
-    return json(
-      completion(
-        'Hi, thanks for calling RelayPay support. This call may be recorded for quality and support purposes. How can I help today?',
-        model,
-        conversationId
-      )
+    return respond(
+      'Hi, thanks for calling RelayPay support. This call may be recorded for quality and support purposes. How can I help today?'
     );
   }
 
@@ -167,18 +224,14 @@ export async function POST(req: Request): Promise<Response> {
       console.warn(`[vapi] degraded turn on ${conversationId}: ${result.degraded}`);
     }
 
-    return json(completion(result.text, model, conversationId));
+    return respond(result.text);
   } catch (e) {
     // Never hang or 500 back to Vapi — a 500 makes the assistant go
     // silent mid-call, which is the worst possible caller experience.
     // Speak a graceful fallback instead.
     console.error(`[vapi] turn threw on ${conversationId}: ${e instanceof Error ? e.message : e}`);
-    return json(
-      completion(
-        "I'm sorry, I'm having trouble on my end right now. Let me arrange for a specialist to follow up with you — could I take your name and email address?",
-        model,
-        conversationId
-      )
+    return respond(
+      "I'm sorry, I'm having trouble on my end right now. Let me arrange for a specialist to follow up with you — could I take your name and email address?"
     );
   }
 }

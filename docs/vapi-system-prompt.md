@@ -1,3 +1,15 @@
+> **This prompt is for the custom-TOOL architecture, which this repo does not implement.**
+>
+> The code implements a **custom LLM** endpoint (`/api/vapi/chat/completions`), where the
+> agent's own prompt in `packages/agent/src/system-prompt.ts` governs behaviour and Vapi's
+> system message is deliberately discarded.
+>
+> Pasting this into an assistant that has no `support_agent` tool makes every substantive
+> turn hit the failure branch below, so the caller hears "I can't reach our support system"
+> while small talk still works. See [vapi-configuration.md](./vapi-configuration.md).
+>
+> Keep this only if you intend to build the `support_agent` tool endpoint.
+
 # Vapi assistant system prompt
 
 Paste the block below into the Vapi assistant's **System Prompt** field.

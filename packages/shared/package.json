@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
     }
   },
   "scripts": {
@@ -17,10 +21,12 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
+    "ws": "^8.22.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "@types/ws": "^8.18.2",
     "typescript": "^5.7.2"
   }
 }

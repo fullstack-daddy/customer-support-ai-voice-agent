@@ -13,7 +13,7 @@
 //    line is scrubbed of volunteered secrets before it renders.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { redactTranscript } from '@relaypay/shared';
+import { redactTranscript } from '@relaypay/shared/client';
 import ContactConfirm from './ContactConfirm';
 import { toast } from './Toast';
 import { checkWebrtcSupport, explainCallError, type PreflightResult } from '@/lib/webrtc-preflight';

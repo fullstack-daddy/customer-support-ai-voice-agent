@@ -69,7 +69,15 @@ export const ID_PATTERNS = {
 // ---- Timeouts / limits -------------------------------------------------
 export const SUPABASE_TIMEOUT_MS = 5_000;
 export const SUPABASE_RETRIES = 1;
-export const AGENT_TURN_TIMEOUT_MS = 25_000;
+/**
+ * How long one agent turn may take before the caller gets the fallback.
+ *
+ * Overridable because the right value is deployment-shaped: a warm
+ * persistent host answers in a few seconds, while a cold serverless
+ * start has to spawn the MCP subprocess first and can legitimately take
+ * much longer on the very first turn of a call.
+ */
+export const AGENT_TURN_TIMEOUT_MS = Number(process.env.AGENT_TURN_TIMEOUT_MS ?? 45_000);
 export const MAX_AGENT_TURNS_PER_REQUEST = 12;
 
 // ---- Brand (brand-direction.md, concretised in the build brief) --------

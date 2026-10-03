@@ -19,7 +19,9 @@
 //    process, which is why the chat-completions route must run on the
 //    Node runtime, not Edge.
 
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_TURN_TIMEOUT_MS, MAX_AGENT_TURNS_PER_REQUEST, type AnswerType } from '@relaypay/shared';
 import { buildSystemPrompt } from './system-prompt.js';
@@ -29,11 +31,46 @@ import { ensureConversation } from '@relaypay/mcp-server/tools';
 
 const MCP_SERVER_NAME = 'relaypay';
 
-/** Absolute path to the compiled MCP entrypoint. Relative paths fail silently. */
+/**
+ * Absolute path to the compiled MCP entrypoint.
+ *
+ * This used to resolve against process.cwd(), which is only the repo
+ * root when you happen to run from there. Under `next dev` the cwd is
+ * apps/web, so the path pointed at apps/web/packages/... — which does
+ * not exist. The SDK then failed to start the MCP server and the whole
+ * subprocess exited with code 1, meaning every turn that needed a tool
+ * died while turns the model could answer unaided still worked. On a
+ * call that reads as "I can't reach our support system".
+ *
+ * Resolve from this module's own location instead, so it does not
+ * matter who started the process or from where. The cwd path is kept
+ * last as a fallback for bundlers that rewrite import.meta.url.
+ */
 function mcpEntrypoint(): string {
   if (process.env.RELAYPAY_MCP_ENTRYPOINT) return process.env.RELAYPAY_MCP_ENTRYPOINT;
-  // From packages/agent/dist -> repo root -> packages/mcp-server/dist/index.js
-  return resolve(process.cwd(), 'packages', 'mcp-server', 'dist', 'index.js');
+
+  const candidates: string[] = [];
+  try {
+    // packages/agent/dist -> packages/agent -> packages -> mcp-server
+    const here = dirname(fileURLToPath(import.meta.url));
+    candidates.push(resolve(here, '..', '..', 'mcp-server', 'dist', 'index.js'));
+    candidates.push(resolve(here, '..', '..', '..', 'mcp-server', 'dist', 'index.js'));
+  } catch {
+    // import.meta.url unavailable; fall through to the cwd guess.
+  }
+  candidates.push(resolve(process.cwd(), 'packages', 'mcp-server', 'dist', 'index.js'));
+
+  const found = candidates.find((c) => existsSync(c));
+  if (found) return found;
+
+  // Say so loudly. The alternative is a subprocess that exits 1 with no
+  // explanation anywhere near the actual cause.
+  console.error(
+    '[agent] MCP entrypoint not found. Looked in: ' +
+      candidates.join(' | ') +
+      '. Run `npm run build` at the repo root, or set RELAYPAY_MCP_ENTRYPOINT to the absolute path.'
+  );
+  return candidates[candidates.length - 1]!;
 }
 
 const TOOL_NAMES = [
@@ -212,6 +249,12 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
     degraded = /abort/i.test(message) ? `timeout after ${AGENT_TURN_TIMEOUT_MS}ms` : message;
     text = FALLBACK_TEXT;
     console.error(`[agent] turn failed for ${conversationId}: ${degraded}`);
+    // The SDK wraps subprocess failures; the useful detail (stderr,
+    // exit signal) hangs off the error object, not its message.
+    const extra = e as Record<string, unknown>;
+    for (const key of ['stderr', 'stdout', 'code', 'exitCode', 'signal', 'cause']) {
+      if (extra?.[key] !== undefined) console.error(`[agent] ${key}:`, extra[key]);
+    }
   } finally {
     clearTimeout(timer);
   }

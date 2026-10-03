@@ -6,11 +6,35 @@
 // to the browser. The guard below makes the violation loud rather than
 // silent if someone imports this from a client component.
 
+import { createRequire } from 'node:module';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { serverEnv } from './env.js';
 import { SUPABASE_TIMEOUT_MS, SUPABASE_RETRIES } from './constants.js';
 
 let cached: SupabaseClient | null = null;
+
+/**
+ * Supply a WebSocket implementation to supabase-js on Node < 22.
+ *
+ * createClient() builds a RealtimeClient eagerly, and that constructor
+ * throws "Node.js 20 detected without native WebSocket support" when
+ * there is no global WebSocket. We never open a realtime subscription,
+ * but the throw happens at construction, so EVERY database call fails —
+ * which surfaces on a live call as the agent being unable to look
+ * anything up, with the real cause buried in a subprocess exit code.
+ *
+ * Node 22+ has a native WebSocket, so this returns undefined there and
+ * supabase-js uses the built-in one.
+ */
+function realtimeTransport(): unknown {
+  if (typeof (globalThis as { WebSocket?: unknown }).WebSocket !== 'undefined') return undefined;
+  try {
+    return createRequire(import.meta.url)('ws');
+  } catch {
+    // Let supabase-js raise its own, more specific error.
+    return undefined;
+  }
+}
 
 export function supabaseAdmin(): SupabaseClient {
   if (typeof window !== 'undefined') {
@@ -18,9 +42,11 @@ export function supabaseAdmin(): SupabaseClient {
   }
   if (cached) return cached;
   const env = serverEnv();
+  const transport = realtimeTransport();
   cached = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { 'x-application-name': 'relaypay-support-agent' } }
+    global: { headers: { 'x-application-name': 'relaypay-support-agent' } },
+    ...(transport ? { realtime: { transport: transport as never } } : {})
   });
   return cached;
 }

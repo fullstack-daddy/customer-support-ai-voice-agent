@@ -67,7 +67,7 @@ Root Directory is the one people get wrong. This is an npm-workspaces monorepo: 
 
 In the Vapi assistant:
 
-- **Model → custom-llm URL:** `https://<your-app>.vercel.app/api/vapi/chat/completions`
+- **Model → custom-llm URL:** `https://<your-app>.vercel.app/api/vapi` (not the full `/chat/completions` path — see [vapi-configuration.md](./vapi-configuration.md))
 - **Server URL:** `https://<your-app>.vercel.app/api/vapi/end-of-call`
 - **Server URL Secret:** the same string as `VAPI_SERVER_SECRET`
 
