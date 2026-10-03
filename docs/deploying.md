@@ -113,6 +113,7 @@ Then point the assistant's custom-llm URL at the ngrok address. It changes every
 | "Voice isn't configured" despite the env being set | `NEXT_PUBLIC_*` is build-time. Redeploy (Vercel) or restart the dev server (local). Locally, also check the `.env` is at the **repo root**. |
 | Build fails on `@relaypay/shared` not found | Root Directory is set to `apps/web`. Set it to the repo root. |
 | Agent replies but calls no tools | Workspace packages not built. `npm run build`. |
+| "WebRTC not supported or suppressed" when starting a call | The page is open on a plain-http address that is not loopback, e.g. `http://192.168.x.x:3000`. Browsers only expose the microphone in a secure context. Use `http://localhost:3000`, or serve over https. The app now detects this up front and says so instead of failing on click. |
 | Vapi gets 401 | `VAPI_SERVER_SECRET` differs between the deployment and the assistant settings. |
 | Emails fail with a domain error | `EMAIL_FROM` is not on a domain verified in Resend. |
 | Admin login returns 500 `not_configured` | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `AUTH_SECRET` not in the environment. Auth fails closed by design. Locally, check they are in the **root** `.env` and that you started with `npm run dev` (which runs `scripts/with-env.mjs`). |
