@@ -46,7 +46,14 @@ export function verifyVapiRequest(headers: Headers, rawBody?: string): string | 
     headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
     null;
 
-  if (!provided) return 'missing secret header';
+  if (!provided) {
+    // Name the headers that arrived, never their values. Without this a
+    // rejection says only "missing secret header", which cannot
+    // distinguish "Vapi was never given a secret" from "Vapi sent it
+    // under a name we do not read".
+    const candidates = [...headers.keys()].filter((k) => k.startsWith('x-vapi') || k === 'authorization');
+    return `missing secret header (auth headers seen: ${candidates.length ? candidates.join(', ') : 'none'})`;
+  }
 
   if (safeEqual(provided, expected)) return null;
 
@@ -56,7 +63,14 @@ export function verifyVapiRequest(headers: Headers, rawBody?: string): string | 
     if (safeEqual(provided, computed)) return null;
   }
 
-  return 'secret mismatch';
+  // Say which header carried it, so a mismatch points at the field to
+  // fix: the model's API key, or the Server URL secret.
+  const via = headers.get('x-vapi-secret')
+    ? 'x-vapi-secret'
+    : headers.get('x-vapi-signature')
+      ? 'x-vapi-signature'
+      : 'authorization';
+  return `secret mismatch (sent via ${via})`;
 }
 
 /** Gate for the internal review dashboard and its API routes. */

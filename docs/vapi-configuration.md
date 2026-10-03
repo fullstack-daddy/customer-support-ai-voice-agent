@@ -69,6 +69,23 @@ curl -X PATCH https://api.vapi.ai/assistant/<assistant-id>   -H "Authorization: 
 
 This is what persists the transcript for admin review. Without it, calls happen but nothing is saved.
 
+### The two secret fields are separate
+
+Vapi authenticates the model endpoint and the Server URL independently, and
+they are configured in different places. Both must carry the same string as
+`VAPI_SERVER_SECRET` on the server.
+
+| Log line | Which field is wrong |
+| --- | --- |
+| `[vapi] rejected request: secret mismatch (sent via authorization)` | **Model → API key / secret.** Vapi sent something, but not the right value. |
+| `[end-of-call] rejected: missing secret header (auth headers seen: none)` | **Advanced → Server URL Secret** is empty. Vapi sent no credential at all. |
+
+A burst of `end-of-call` rejections per call is normal when the secret is
+missing: Vapi posts several message types (status updates, transcripts,
+end-of-call-report) to the Server URL, and every one is rejected. Narrowing
+the assistant's `serverMessages` to `end-of-call-report` removes the noise —
+nothing else is used here.
+
 ## 3. First message
 
 Set **First message** to something short, or leave Vapi to ask our endpoint. Our route already returns a greeting when there is no user turn yet:
