@@ -30,7 +30,15 @@ Pick Custom LLM unless you specifically want Vapi's LLM handling small talk.
 | Model name | anything (e.g. `relaypay-support-agent`) — our route ignores it |
 | System prompt | leave empty or one line; **the route discards it** |
 
-On the URL: Vapi's own docs are inconsistent about whether `/chat/completions` is appended to what you type. This repo serves the same handler at **both** `/api/vapi` and `/api/vapi/chat/completions`, so `https://<your-host>/api/vapi` is correct either way. Do not paste the full `/chat/completions` path — if Vapi appends, you get `/chat/completions/chat/completions` and a 404 on every turn.
+On the URL: **Vapi appends `/chat/completions` to whatever you type.** The dashboard says so directly under the field — it previews the full URL it will call. So enter the base and let it append:
+
+| You type | Vapi calls | Result |
+| --- | --- | --- |
+| `https://<host>/api/vapi` | `https://<host>/api/vapi/chat/completions` | correct |
+| `https://<host>/api/vapi/chat/completions` | `.../chat/completions/chat/completions` | 404 every turn |
+| `https://<host>/chat/completions` | `/chat/completions/chat/completions` | 404 every turn |
+
+Read that preview line before saving; it is the fastest way to catch this. The repo also serves the handler at `/api/vapi` itself, so a GET to the base returns a health payload you can check in a browser.
 
 The system prompt genuinely does not matter here. The route drops Vapi's system message on purpose and uses the agent's own, which carries the security rules. Changing the dashboard prompt will not change the agent's behaviour — edit `packages/agent/src/system-prompt.ts` instead.
 
